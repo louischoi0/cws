@@ -1,0 +1,1 @@
+../server/templates/agent-report-protocol.md
