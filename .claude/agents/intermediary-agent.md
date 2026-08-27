@@ -26,8 +26,11 @@ environment). Every call below is plain HTTP with a JSON body — use
 
 ## One iteration
 
-1. **Fetch available work.** `GET {SERVER_URL}/tasks/?pending=true&claimable=true`
-   — pending *and* not already held by another agent. If empty, there is
+1. **Fetch available work.** `GET {SERVER_URL}/tasks/?milestone_id=<id>&pending=true&claimable=true`
+   — pending *and* not already held by another agent. `milestone_id` is
+   **required** (a bare `GET /tasks/` is a 400): the queue is read per
+   milestone, so start from the one this project works toward —
+   `GET {SERVER_URL}/milestones/` lists them, matched on `directory`. If empty, there is
    nothing to do this round — say so and stop (or, if invoked under
    `/loop`, let the loop schedule the next check rather than busy-polling).
 2. **Claim one task before working it.** Pick one (oldest `raised_at`

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"text/template"
@@ -178,6 +179,21 @@ type claimRequest struct {
 	Agent string `json:"agent"`
 }
 
+// taskPatchable lists the columns PATCH /tasks/{id}/ may write, in a fixed
+// order so the generated SET clause is deterministic rather than following
+// Go's randomized map iteration.
+//
+// Deliberately excluded, and refused by name rather than ignored: `id`
+// (identity — invariant 11 of the engine makes it unupdatable anyway),
+// `raised_at`/`last_shipped_at` (lifecycle, written at creation and by
+// result reporting), and `claimed_by`/`claimed_at` (owned by
+// claim/release, whose compare-and-swap is the only safe way to move
+// them — a plain PATCH would defeat the mutual exclusion entirely).
+var taskPatchable = []string{
+	"version", "title", "content", "type",
+	"milestone_id", "priority", "derived_from",
+}
+
 // updateMilestoneRequest is all-optional: a nil field is left untouched,
 // so a caller can PATCH just `state` without restating the rest.
 type updateMilestoneRequest struct {
@@ -215,6 +231,7 @@ func main() {
 	mux.HandleFunc("POST /tasks/{$}", handleCreateTask(db))
 	mux.HandleFunc("GET /tasks/{$}", handleListTasks(db))
 	mux.HandleFunc("GET /tasks/{id}/{$}", handleGetTask(db))
+	mux.HandleFunc("PATCH /tasks/{id}/{$}", handleUpdateTask(db))
 	mux.HandleFunc("POST /tasks/{id}/claim/{$}", handleClaimTask(db))
 	mux.HandleFunc("POST /tasks/{id}/release/{$}", handleReleaseTask(db))
 	mux.HandleFunc("POST /tasks/{id}/results/{$}", handleCreateResult(db))
@@ -407,13 +424,29 @@ var helpEndpoints = []helpEndpoint{
 	{
 		Method:      "GET",
 		Path:        "/tasks/",
-		Description: "Lists tasks, optionally filtered.",
+		Description: "Lists the tasks of one milestone. The queue is always read in the context of a milestone, so milestone_id is required — an unscoped listing would hand an agent work belonging to another goal.",
 		QueryParams: []helpParam{
+			{"milestone_id", "REQUIRED, positive integer. 400 without it. GET /milestones/ lists them"},
 			{"pending", "true to list only tasks whose last_shipped_at still equals raised_at (never reported against)"},
-			{"milestone_id", "positive integer; combinable with the others"},
 			{"claimable", "true to list only tasks nothing currently holds (unclaimed, or claim expired). Advisory — another agent can claim one between this read and your POST; the claim call is what decides"},
 		},
-		Response: "JSON array of tasks.",
+		Response: "JSON array of tasks, or 400 if milestone_id is missing or malformed.",
+	},
+	{
+		Method:      "PATCH",
+		Path:        "/tasks/{id}/",
+		Description: "Updates a task in place. Only keys present in the body are written; an explicit null clears a nullable column (milestone_id, priority, derived_from). An unknown or non-patchable key is refused by name rather than ignored.",
+		PathParams:  []helpParam{{"id", "positive integer"}},
+		Body: []helpParam{
+			{"version", "optional, " + identRe.String()},
+			{"title", "optional, " + freeTextRe.String()},
+			{"content", "optional, markdown, non-empty, ~1.2 KB raw text cap"},
+			{"type", "optional, " + identRe.String()},
+			{"milestone_id", "optional, positive integer or null. Engine-enforced FK — 400 if the milestone doesn't exist"},
+			{"priority", "optional, integer or null"},
+			{"derived_from", "optional, positive integer or null. Checked app-side; cannot point at the task itself"},
+		},
+		Response: "the full updated task, 404 if no such task, 400 if no field was supplied or a non-patchable one was (raised_at, last_shipped_at, claimed_by and claimed_at are refused — leases move only through claim/release).",
 	},
 	{
 		Method:      "GET",
@@ -979,7 +1012,23 @@ func handleCreateTask(db *KDSClient) http.HandlerFunc {
 
 func handleListTasks(db *KDSClient) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		reply, err := db.Exec("SELECT * FROM task ORDER BY id")
+		// milestone_id is mandatory: the queue is always read in the
+		// context of the milestone being worked toward, so an unscoped
+		// listing would hand an agent tasks belonging to some other goal.
+		// Refused rather than defaulted — there is no sensible default
+		// milestone, and picking one silently would be a wrong answer
+		// shaped like a right one.
+		mid := r.URL.Query().Get("milestone_id")
+		if mid == "" {
+			http.Error(w, "milestone_id is required: pass ?milestone_id=<id> (GET /milestones/ lists them)", http.StatusBadRequest)
+			return
+		}
+		if !idRe.MatchString(mid) {
+			http.Error(w, fmt.Sprintf("invalid milestone_id %q: must be a positive integer", mid), http.StatusBadRequest)
+			return
+		}
+
+		reply, err := db.Exec(fmt.Sprintf("SELECT * FROM task WHERE milestone_id = %s ORDER BY id", mid))
 		if err != nil {
 			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
 			return
@@ -994,20 +1043,6 @@ func handleListTasks(db *KDSClient) http.HandlerFunc {
 			filtered := tasks[:0]
 			for _, t := range tasks {
 				if t.Pending {
-					filtered = append(filtered, t)
-				}
-			}
-			tasks = filtered
-		}
-
-		if mid := r.URL.Query().Get("milestone_id"); mid != "" {
-			if !idRe.MatchString(mid) {
-				http.Error(w, fmt.Sprintf("invalid milestone_id %q: must be a positive integer", mid), http.StatusBadRequest)
-				return
-			}
-			filtered := tasks[:0]
-			for _, t := range tasks {
-				if t.MilestoneID != nil && *t.MilestoneID == mid {
 					filtered = append(filtered, t)
 				}
 			}
@@ -1052,6 +1087,188 @@ func handleGetTask(db *KDSClient) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(t)
+	}
+}
+
+// handleUpdateTask patches one task in place. Every field is optional;
+// only keys actually present in the body are written, and an explicit
+// JSON `null` clears a nullable column (which is why the body is decoded
+// as raw messages — with plain pointers, "absent" and "null" arrive
+// identically and clearing would be unexpressible).
+//
+// An unknown or non-patchable key is refused by name rather than
+// ignored: silently dropping `claimed_by` from a PATCH would read as
+// having moved a lease that in fact never moved.
+func handleUpdateTask(db *KDSClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := pathID(w, r)
+		if !ok {
+			return
+		}
+
+		var fields map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
+			http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		patchable := make(map[string]bool, len(taskPatchable))
+		for _, k := range taskPatchable {
+			patchable[k] = true
+		}
+		var unknown []string
+		for k := range fields {
+			if !patchable[k] {
+				unknown = append(unknown, k)
+			}
+		}
+		if len(unknown) > 0 {
+			sort.Strings(unknown)
+			http.Error(w, fmt.Sprintf("cannot patch %s; patchable fields are %s",
+				strings.Join(unknown, ", "), strings.Join(taskPatchable, ", ")), http.StatusBadRequest)
+			return
+		}
+
+		// isNull distinguishes an explicit JSON null from a value.
+		isNull := func(raw json.RawMessage) bool {
+			return string(bytes.TrimSpace(raw)) == "null"
+		}
+		badRequest := func(msg string) {
+			http.Error(w, msg, http.StatusBadRequest)
+		}
+
+		var sets []string
+		for _, key := range taskPatchable {
+			raw, present := fields[key]
+			if !present {
+				continue
+			}
+
+			switch key {
+			case "version", "type":
+				var v string
+				if err := json.Unmarshal(raw, &v); err != nil {
+					badRequest(fmt.Sprintf("%s must be a string", key))
+					return
+				}
+				if !identRe.MatchString(v) {
+					badRequest(fmt.Sprintf("invalid %s %q: must match %s", key, v, identRe.String()))
+					return
+				}
+				sets = append(sets, fmt.Sprintf("%s = '%s'", key, v))
+
+			case "title":
+				var v string
+				if err := json.Unmarshal(raw, &v); err != nil {
+					badRequest("title must be a string")
+					return
+				}
+				if !freeTextRe.MatchString(v) {
+					badRequest(fmt.Sprintf("invalid title %q: must match %s", v, freeTextRe.String()))
+					return
+				}
+				sets = append(sets, fmt.Sprintf("title = '%s'", v))
+
+			case "content":
+				var v string
+				if err := json.Unmarshal(raw, &v); err != nil {
+					badRequest("content must be a string")
+					return
+				}
+				if v == "" {
+					badRequest("content must not be empty")
+					return
+				}
+				encoded := base64.StdEncoding.EncodeToString([]byte(v))
+				if len(encoded) > maxTextBytes {
+					http.Error(w, fmt.Sprintf("content too large: %d bytes base64-encoded, cell capacity is %d", len(encoded), maxTextBytes), http.StatusRequestEntityTooLarge)
+					return
+				}
+				sets = append(sets, fmt.Sprintf("content = '%s'", encoded))
+
+			case "priority":
+				if isNull(raw) {
+					sets = append(sets, "priority = NULL")
+					break
+				}
+				var v int
+				if err := json.Unmarshal(raw, &v); err != nil {
+					badRequest("priority must be an integer or null")
+					return
+				}
+				sets = append(sets, fmt.Sprintf("priority = %d", v))
+
+			case "milestone_id":
+				if isNull(raw) {
+					sets = append(sets, "milestone_id = NULL")
+					break
+				}
+				var v string
+				if err := json.Unmarshal(raw, &v); err != nil {
+					badRequest("milestone_id must be a string or null")
+					return
+				}
+				if !idRe.MatchString(v) {
+					badRequest(fmt.Sprintf("invalid milestone_id %q: must be a positive integer", v))
+					return
+				}
+				// Existence is enforced by the engine FK; a bad id surfaces
+				// as FK_VIOLATION on the UPDATE below.
+				sets = append(sets, fmt.Sprintf("milestone_id = %s", v))
+
+			case "derived_from":
+				if isNull(raw) {
+					sets = append(sets, "derived_from = NULL")
+					break
+				}
+				var v string
+				if err := json.Unmarshal(raw, &v); err != nil {
+					badRequest("derived_from must be a string or null")
+					return
+				}
+				if !idRe.MatchString(v) {
+					badRequest(fmt.Sprintf("invalid derived_from %q: must be a positive integer", v))
+					return
+				}
+				if v == id {
+					badRequest("derived_from cannot point at the task itself")
+					return
+				}
+				// derived_from has no engine FK (KDS refuses a self-
+				// referential REFERENCES), so the parent is checked here.
+				parent, err := fetchTask(db, v)
+				if err != nil {
+					http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
+					return
+				}
+				if parent == nil {
+					badRequest(fmt.Sprintf("derived_from task %s not found", v))
+					return
+				}
+				sets = append(sets, fmt.Sprintf("derived_from = %s", v))
+			}
+		}
+
+		if len(sets) == 0 {
+			badRequest("no fields to update: pass at least one of " + strings.Join(taskPatchable, ", "))
+			return
+		}
+
+		reply, err := db.Exec(fmt.Sprintf("UPDATE task SET %s WHERE id = %s", strings.Join(sets, ", "), id))
+		if err != nil {
+			if strings.Contains(err.Error(), "FK_VIOLATION") {
+				badRequest("milestone not found")
+				return
+			}
+			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		if updatedCount(reply) != 1 {
+			http.Error(w, "task not found", http.StatusNotFound)
+			return
+		}
+
+		respondClaimed(w, db, id)
 	}
 }
 

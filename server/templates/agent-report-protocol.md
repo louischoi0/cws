@@ -15,8 +15,9 @@ working a task from that queue in this project:
    `{id, version, title, content, type, raised_at, last_shipped_at,
    pending, derived_from, milestone_id, priority, claimed_by, claimed_at,
    claim_expired}` — `content` is the task body in markdown.
-   `GET {{.ServerURL}}/tasks/?pending=true&claimable=true` lists what is
-   outstanding and unheld; add `&milestone_id=<id>` to scope it.
+   `GET {{.ServerURL}}/tasks/?milestone_id=<id>&pending=true&claimable=true`
+   lists what is outstanding and unheld for one milestone. `milestone_id`
+   is **required** — the queue is always read in the context of one.
 
 2. **Do the actual work using this project's own rules.** Read and follow
    *this project's* `CLAUDE.md` and invoke *this project's* own
@@ -52,10 +53,11 @@ working a task from that queue in this project:
    milestone progress) back to `{{.ServerURL}}`, so the working agent
    itself never has to.
 
-`GET {{.ServerURL}}/tasks/?pending=true` lists every task whose
-`last_shipped_at` still equals its `raised_at` — i.e. never reported
-against. A task may carry `derived_from` (another task's id) when it's a
-subtask — not an enforced link, just informational.
+`GET {{.ServerURL}}/tasks/?milestone_id=<id>&pending=true` lists every
+task of that milestone whose `last_shipped_at` still equals its
+`raised_at` — i.e. never reported against. A task may carry
+`derived_from` (another task's id) when it's a subtask — not an enforced
+link, just informational.
 
 **Milestones** group a project's work: `GET {{.ServerURL}}/milestones/`,
 and `PATCH {{.ServerURL}}/milestones/{id}/` with `{"state": "..."}` to

@@ -49,9 +49,13 @@ file could.
   issues/tasks/results: the thing the loop is working toward. The PATCH
   is all-optional-fields, and is how the loop records that a milestone
   was reached.
-- `POST /tasks/`, `GET /tasks/` (filters, combinable: `?pending=true`,
-  `?milestone_id=<id>`, `?claimable=true`),
-  `GET /tasks/{id}/` — the task queue (see below). A task may
+- `POST /tasks/`, `GET /tasks/` (**`?milestone_id=<id>` is required** —
+  the queue is always read in the context of one milestone; add
+  `?pending=true` and/or `?claimable=true`), `GET /tasks/{id}/`,
+  `PATCH /tasks/{id}/` (only the keys you send are written; an explicit
+  `null` clears a nullable column, and `claimed_by`/`claimed_at`/
+  `raised_at`/`last_shipped_at` are refused by name — leases move only
+  through claim/release) — the task queue (see below). A task may
   carry `derived_from` (another task's id, nullable) when it's a subtask —
   **not an enforced foreign key**: KDS refuses a column referencing the
   table it's declared on, so this is validated app-side instead.
@@ -62,8 +66,9 @@ file could.
   lease on a task, so two concurrent sessions never work the same one.
   Claiming is atomic under concurrency (a compare-and-swap; see
   `CLAUDE.md`), a lease expires after 30 minutes and may then be stolen,
-  and re-claiming your own task refreshes it. `GET /tasks/?claimable=true`
-  lists what nothing currently holds.
+  and re-claiming your own task refreshes it.
+  `GET /tasks/?milestone_id=<id>&claimable=true` lists what nothing
+  currently holds.
 - `POST /tasks/{id}/results/`, `GET /tasks/{id}/results/` — reporting and
   reading results against a task (one task can have many results).
   Reporting also releases the claim.
@@ -93,7 +98,7 @@ its constraints.
 
 The **intermediary agent** (`.claude/agents/intermediary-agent.md`) is the
 worker on the other end: it polls
-`GET /tasks/?pending=true&claimable=true`, **claims** one with
+`GET /tasks/?milestone_id=<id>&pending=true&claimable=true`, **claims** one with
 `POST /tasks/{id}/claim/` — a 409 there means another agent got it first,
 so it moves on — and does the actual work *inside the target project*,
 following *that project's own* `CLAUDE.md` and subagents rather than any

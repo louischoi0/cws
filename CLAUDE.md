@@ -60,7 +60,7 @@ one; `issue` still has no such column — that half of the gap remains.
 | `raised_at` | timestamp, KST (UTC+9) | when the task was created |
 | `last_shipped_at` | timestamp, KST (UTC+9) | last time any session reported a result against this task — **defaults to `raised_at`** at creation, so `raised_at == last_shipped_at` is this schema's "never shipped" convention, exposed as `pending` in the API |
 | `derived_from` | integer, nullable | another task's id, if this one is a subtask. **Not an enforced FK** — KDS refuses a column that `REFERENCES` the table it's declared on ("references unknown relation", confirmed empirically), so existence is checked app-side in `handleCreateTask` instead |
-| `milestone_id` | integer, nullable, `REFERENCES milestone` (enforced FK — a different table than the one it's declared on, so unlike `derived_from` this one *is* engine-checked) | which milestone this task belongs to; `GET /tasks/?milestone_id=<id>` filters on it (combinable with `?pending=true`) |
+| `milestone_id` | integer, nullable, `REFERENCES milestone` (enforced FK — a different table than the one it's declared on, so unlike `derived_from` this one *is* engine-checked) | which milestone this task belongs to. **`GET /tasks/` requires `?milestone_id=<id>`** and 400s without it — the queue is always read per milestone, so a task left NULL here is invisible to the list endpoint and reachable only by its own id. Combinable with `?pending=true`/`?claimable=true` |
 | `priority` | integer, nullable | no fixed range or direction (not documented as "lower is more urgent" or the reverse) — a caller convention, not an engine one |
 | `claimed_by` | string, nullable | which agent currently holds an exclusive lease on this task (see below); NULL when nobody does |
 | `claimed_at` | timestamp, KST (UTC+9), nullable | when that lease was taken or last refreshed |
@@ -82,6 +82,15 @@ evaluated by anyone but the claimer) may be stolen. A live agent
 refreshes by claiming again; that is the only heartbeat. Reporting a
 result releases the claim unconditionally, in the same transaction as
 the insert.
+
+`PATCH /tasks/{id}/` edits a task after creation — `version`, `title`,
+`content`, `type`, `milestone_id`, `priority`, `derived_from`. Only keys
+present in the body are written, and an explicit JSON `null` clears a
+nullable column (the body is decoded as raw messages precisely so
+"absent" and "null" stay distinguishable). **`claimed_by`, `claimed_at`,
+`raised_at` and `last_shipped_at` are refused by name, not ignored** —
+leases move only through the claim/release CAS, and silently dropping
+them from a PATCH would read as having moved one that never moved.
 
 KDS *does* support real `NULL` storage (confirmed via `derived_from`
 above) — `last_shipped_at`'s sentinel-equality convention predates that
