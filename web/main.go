@@ -24,8 +24,14 @@ import (
 	"github.com/yuin/goldmark/extension"
 )
 
-//go:embed templates/dashboard.html
-var dashboardHTML string
+//go:embed templates/layout.html
+var layoutHTML string
+
+//go:embed templates/list.html
+var listHTML string
+
+//go:embed templates/detail.html
+var detailHTML string
 
 // md renders the markdown bodies the API stores. Raw HTML is left
 // **disabled** — goldmark escapes it unless html.WithUnsafe() is passed,
@@ -36,11 +42,18 @@ var dashboardHTML string
 // none of which reintroduce raw HTML.
 var md = goldmark.New(goldmark.WithExtensions(extension.GFM))
 
-var dashboardTemplate = template.Must(
-	template.New("dashboard").Funcs(template.FuncMap{
-		"shortTime": shortTime,
-		"markdown":  renderMarkdown,
-	}).Parse(dashboardHTML))
+var templateFuncs = template.FuncMap{
+	"shortTime": shortTime,
+	"markdown":  renderMarkdown,
+}
+
+// Two template sets over one layout: each content file defines "content",
+// so they cannot be parsed together — the layout is compiled once per
+// page kind instead of duplicating its markup.
+var (
+	listTemplate   = template.Must(template.New("list").Funcs(templateFuncs).Parse(layoutHTML + listHTML))
+	detailTemplate = template.Must(template.New("detail").Funcs(templateFuncs).Parse(layoutHTML + detailHTML))
+)
 
 // renderMarkdown converts stored markdown to HTML for the page. On a
 // conversion failure it falls back to the escaped source text rather than
@@ -95,20 +108,22 @@ type result struct {
 }
 
 type issue struct {
-	ID      string `json:"id"`
-	Project string `json:"project"`
-	Alias   string `json:"alias"`
-	Title   string `json:"title"`
-	Content string `json:"content"`
+	ID            string `json:"id"`
+	Project       string `json:"project"`
+	Alias         string `json:"alias"`
+	Title         string `json:"title"`
+	Content       string `json:"content"`
+	LastUpdatedAt string `json:"last_updated_at"`
 }
 
 type issueReport struct {
-	ID       string `json:"id"`
-	Project  string `json:"project"`
-	Version  string `json:"version"`
-	State    string `json:"state"`
-	Category string `json:"category"`
-	Text     string `json:"text"`
+	ID            string `json:"id"`
+	Project       string `json:"project"`
+	Version       string `json:"version"`
+	State         string `json:"state"`
+	Category      string `json:"category"`
+	Text          string `json:"text"`
+	LastUpdatedAt string `json:"last_updated_at"`
 }
 
 type overview struct {
@@ -140,7 +155,28 @@ type milestoneGroup struct {
 	ClaimedCnt int
 }
 
+// metaItem is one label/value pair in a detail page's header strip.
+// Kind picks how it renders: "state" gets the workflow dot, "mono" a
+// monospace chip, "plain" no chip at all, "" an ordinary chip.
+type metaItem struct{ Key, Value, Kind string }
+
+// detailData is one record shown on its own page, where its markdown is
+// rendered at reading size rather than folded into a table cell.
+type detailData struct {
+	Title     string
+	Content   string
+	Meta      []metaItem
+	Results   []result
+	BackView  string
+	BackLabel string
+}
+
 type pageData struct {
+	// View is which single table the list page shows. The nav selects a
+	// table rather than scrolling to one, so exactly one is rendered.
+	View   string
+	Detail *detailData
+
 	Groups       []milestoneGroup
 	Milestones   []milestone
 	Issues       []issue
@@ -165,6 +201,9 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", handleDashboard(apiBase))
+	mux.HandleFunc("GET /task/{id}", handleDetail(apiBase, "task"))
+	mux.HandleFunc("GET /issue/{id}", handleDetail(apiBase, "issue"))
+	mux.HandleFunc("GET /report/{id}", handleDetail(apiBase, "report"))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "ok")
 	})
@@ -180,47 +219,186 @@ func envOr(key, def string) string {
 	return def
 }
 
+// validViews is the closed set ?view= accepts. An unknown value falls
+// back to the default rather than erroring — a mistyped tab should still
+// show the page.
+var validViews = map[string]bool{"milestones": true, "tasks": true, "issues": true, "reports": true}
+
+const defaultView = "tasks"
+
 func handleDashboard(apiBase string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data := pageData{
-			APIBase:   apiBase,
-			FetchedAt: time.Now().In(kst()).Format("2006-01-02 15:04:05 MST"),
+		view := r.URL.Query().Get("view")
+		if !validViews[view] {
+			view = defaultView
 		}
 
-		ov, err := fetchOverview(apiBase)
-		if err != nil {
-			// Render the page with the error rather than a bare 502: the
-			// operator wants to see *that* the API is unreachable, in the
-			// place they were already looking.
-			data.Err = err.Error()
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusBadGateway)
-			dashboardTemplate.Execute(w, data)
+		data, ov, ok := basePage(w, apiBase, view, listTemplate)
+		if !ok {
 			return
 		}
-
 		data.Groups = group(ov)
 		data.Milestones = ov.Milestones
 		data.Issues = ov.Issues
 		data.IssueReports = ov.IssueReports
-		data.TotalMilestones = len(ov.Milestones)
-		data.TotalTasks = len(ov.Tasks)
-		data.TotalIssues = len(ov.Issues)
-		data.TotalReports = len(ov.IssueReports)
-		for _, t := range ov.Tasks {
-			if t.Pending {
-				data.TotalPending++
-			}
-			if t.ClaimedBy != nil && !t.ClaimExpired {
-				data.TotalClaimed++
-			}
-		}
 
+		render(w, listTemplate, data)
+	}
+}
+
+// basePage fetches the snapshot and fills everything the nav needs. On a
+// fetch failure it renders the error through the given template and
+// reports ok=false, so the operator sees the failure where they were
+// already looking rather than getting a bare 502.
+func basePage(w http.ResponseWriter, apiBase, view string, tpl *template.Template) (pageData, *overview, bool) {
+	data := pageData{
+		View:      view,
+		APIBase:   apiBase,
+		FetchedAt: time.Now().In(kst()).Format("2006-01-02 15:04:05 MST"),
+	}
+	ov, err := fetchOverview(apiBase)
+	if err != nil {
+		data.Err = err.Error()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := dashboardTemplate.Execute(w, data); err != nil {
-			log.Printf("render: %v", err)
+		w.WriteHeader(http.StatusBadGateway)
+		tpl.ExecuteTemplate(w, "layout", data)
+		return data, nil, false
+	}
+	data.TotalMilestones = len(ov.Milestones)
+	data.TotalTasks = len(ov.Tasks)
+	data.TotalIssues = len(ov.Issues)
+	data.TotalReports = len(ov.IssueReports)
+	for _, t := range ov.Tasks {
+		if t.Pending {
+			data.TotalPending++
+		}
+		if t.ClaimedBy != nil && !t.ClaimExpired {
+			data.TotalClaimed++
 		}
 	}
+	return data, ov, true
+}
+
+func render(w http.ResponseWriter, tpl *template.Template, data pageData) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tpl.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render: %v", err)
+	}
+}
+
+// handleDetail renders one record on its own page. It reads the same
+// /overview snapshot the list does and picks the row out of it: the
+// dataset is small, and one dependency is easier to reason about than
+// three per-kind endpoints — the issue lookup in particular is keyed by
+// project+alias in the API, not by the id the list links with.
+func handleDetail(apiBase, kind string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+
+		view := map[string]string{"task": "tasks", "issue": "issues", "report": "reports"}[kind]
+		data, ov, ok := basePage(w, apiBase, view, detailTemplate)
+		if !ok {
+			return
+		}
+
+		d := buildDetail(kind, id, ov)
+		if d == nil {
+			w.WriteHeader(http.StatusNotFound)
+			data.Err = fmt.Sprintf("no %s with id %q", kind, id)
+			render(w, detailTemplate, data)
+			return
+		}
+		data.Detail = d
+		render(w, detailTemplate, data)
+	}
+}
+
+func buildDetail(kind, id string, ov *overview) *detailData {
+	switch kind {
+	case "task":
+		for _, t := range ov.Tasks {
+			if t.ID != id {
+				continue
+			}
+			meta := []metaItem{
+				{"id", t.ID, "mono"},
+				{"state", t.State, "state"},
+				{"type", t.Type, ""},
+				{"version", t.Version, "mono"},
+			}
+			if t.Priority != nil {
+				meta = append(meta, metaItem{"prio", fmt.Sprint(*t.Priority), ""})
+			}
+			if t.MilestoneID != nil {
+				for _, m := range ov.Milestones {
+					if m.ID == *t.MilestoneID {
+						meta = append(meta, metaItem{"milestone", m.Title, ""})
+					}
+				}
+			}
+			if t.DerivedFrom != nil {
+				meta = append(meta, metaItem{"subtask of", "#" + *t.DerivedFrom, ""})
+			}
+			if t.ClaimedBy != nil {
+				label := *t.ClaimedBy
+				if t.ClaimExpired {
+					label += " (lease expired)"
+				}
+				meta = append(meta, metaItem{"claimed by", label, ""})
+			}
+			meta = append(meta,
+				metaItem{"raised", t.RaisedAt, "plain"},
+				metaItem{"updated", t.LastUpdatedAt, "plain"})
+
+			var rs []result
+			for _, res := range ov.Results {
+				if res.TaskID == t.ID {
+					rs = append(rs, res)
+				}
+			}
+			return &detailData{
+				Title: t.Title, Content: t.Content, Meta: meta, Results: rs,
+				BackView: "tasks", BackLabel: "Tasks",
+			}
+		}
+	case "issue":
+		for _, is := range ov.Issues {
+			if is.ID != id {
+				continue
+			}
+			return &detailData{
+				Title:   is.Title,
+				Content: is.Content,
+				Meta: []metaItem{
+					{"id", is.ID, "mono"},
+					{"project", is.Project, ""},
+					{"alias", is.Alias, "mono"},
+					{"updated", is.LastUpdatedAt, "plain"},
+				},
+				BackView: "issues", BackLabel: "Issues",
+			}
+		}
+	case "report":
+		for _, rp := range ov.IssueReports {
+			if rp.ID != id {
+				continue
+			}
+			return &detailData{
+				Title:   fmt.Sprintf("%s · %s · %s", rp.Project, rp.Category, rp.State),
+				Content: rp.Text,
+				Meta: []metaItem{
+					{"id", rp.ID, "mono"},
+					{"project", rp.Project, ""},
+					{"version", rp.Version, "mono"},
+					{"state", rp.State, ""},
+					{"category", rp.Category, ""},
+					{"updated", rp.LastUpdatedAt, "plain"},
+				},
+				BackView: "reports", BackLabel: "Status reports",
+			}
+		}
+	}
+	return nil
 }
 
 func fetchOverview(apiBase string) (*overview, error) {

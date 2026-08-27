@@ -1,0 +1,161 @@
+{{define "content"}}
+
+{{if eq .View "milestones"}}
+  <h2 class="sec">Milestones <span class="n">{{.TotalMilestones}}</span></h2>
+  {{if .Milestones}}
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>id</th><th>state</th><th>milestone</th><th>version</th>
+            <th>directory</th><th class="when">updated</th>
+          </tr>
+        </thead>
+        <tbody>
+        {{range .Milestones}}
+          <tr>
+            <td class="id">{{.ID}}</td>
+            <td class="state"><span class="s-free"><span class="dot"></span>{{.State}}</span></td>
+            <td class="title">{{.Title}}</td>
+            <td><span class="chip mono">{{.Version}}</span></td>
+            <td class="id">{{.Directory}}</td>
+            <td class="when">{{shortTime .LastUpdatedAt}}</td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <div class="card"><p class="empty">No milestones.</p></div>
+  {{end}}
+{{end}}
+
+{{if eq .View "tasks"}}
+  <h2 class="sec">
+    Tasks <span class="n">{{.TotalPending}} pending of {{.TotalTasks}}{{if .TotalClaimed}} · {{.TotalClaimed}} claimed{{end}}</span>
+  </h2>
+
+  {{range .Groups}}
+    <div class="card">
+      <div class="grp-head">
+        {{if .Unassigned}}
+          <span class="name">No milestone</span>
+        {{else}}
+          <span class="name">{{.Milestone.Title}}</span>
+          <span class="chip mono">{{.Milestone.Version}}</span>
+          <span class="dir">{{.Milestone.Directory}}</span>
+        {{end}}
+        <span class="tally">
+          {{.PendingCnt}} pending · {{.ShippedCnt}} shipped{{if .ClaimedCnt}} · {{.ClaimedCnt}} claimed{{end}}
+        </span>
+      </div>
+
+      {{if .Unassigned}}
+        <p class="banner">
+          These carry no milestone_id, so <code>GET /tasks/</code> cannot return
+          them — it requires one. They are reachable only by their own id.
+        </p>
+      {{end}}
+
+      {{if .Tasks}}
+        <table>
+          <thead>
+            <tr>
+              <th>id</th><th>state</th><th class="claim">claim</th>
+              <th>task</th><th>type</th><th class="num">prio</th>
+              <th class="opt">raised</th><th>updated</th>
+            </tr>
+          </thead>
+          <tbody>
+          {{range .Tasks}}
+            <tr>
+              <td class="id">{{.ID}}</td>
+              <td class="state">
+                <span class="st-{{.State}}"><span class="dot"></span>{{.State}}</span>
+              </td>
+              <td class="claim">
+                {{if .ClaimedBy}}
+                  {{if .ClaimExpired}}<span class="c-expired">expired · {{.ClaimedBy}}</span>
+                  {{else}}<span class="c-held">{{.ClaimedBy}}</span>{{end}}
+                {{else}}<span class="c-none">—</span>{{end}}
+              </td>
+              <td>
+                <a class="rowlink" href="/task/{{.ID}}"><span class="title">{{.Title}}</span></a>
+                {{if not .Pending}}<span class="chip">reported</span>{{end}}
+                {{if .DerivedFrom}}<span class="chip">↳ #{{.DerivedFrom}}</span>{{end}}
+                {{if .Results}}<span class="chip">{{len .Results}} result{{if ne (len .Results) 1}}s{{end}}</span>{{end}}
+              </td>
+              <td><span class="chip">{{.Type}}</span></td>
+              <td class="num">{{if .Priority}}{{.Priority}}{{else}}—{{end}}</td>
+              <td class="when opt">{{shortTime .RaisedAt}}</td>
+              <td class="when">{{shortTime .LastUpdatedAt}}</td>
+            </tr>
+          {{end}}
+          </tbody>
+        </table>
+      {{else}}
+        <p class="empty">No tasks.</p>
+      {{end}}
+    </div>
+  {{else}}
+    {{if not .Err}}
+      <div class="card"><p class="empty">No tasks.</p></div>
+    {{end}}
+  {{end}}
+{{end}}
+
+{{if eq .View "issues"}}
+  <h2 class="sec">Issues <span class="n">{{.TotalIssues}}</span></h2>
+  {{if .Issues}}
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>id</th><th>project</th><th>alias</th><th>issue</th><th class="when">updated</th></tr>
+        </thead>
+        <tbody>
+        {{range .Issues}}
+          <tr>
+            <td class="id">{{.ID}}</td>
+            <td><span class="chip">{{.Project}}</span></td>
+            <td class="id">{{.Alias}}</td>
+            <td><a class="rowlink" href="/issue/{{.ID}}"><span class="title">{{.Title}}</span></a></td>
+            <td class="when">{{shortTime .LastUpdatedAt}}</td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <div class="card"><p class="empty">No issues.</p></div>
+  {{end}}
+{{end}}
+
+{{if eq .View "reports"}}
+  <h2 class="sec">Status reports <span class="n">{{.TotalReports}}</span></h2>
+  {{if .IssueReports}}
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>id</th><th>state</th><th>project</th><th>version</th>
+              <th>category</th><th class="when">updated</th></tr>
+        </thead>
+        <tbody>
+        {{range .IssueReports}}
+          <tr>
+            <td class="id"><a class="rowlink" href="/report/{{.ID}}"><span class="title">{{.ID}}</span></a></td>
+            <td class="state"><span class="s-free"><span class="dot"></span>{{.State}}</span></td>
+            <td><span class="chip">{{.Project}}</span></td>
+            <td><span class="chip mono">{{.Version}}</span></td>
+            <td><span class="chip">{{.Category}}</span></td>
+            <td class="when">{{shortTime .LastUpdatedAt}}</td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <div class="card"><p class="empty">No status reports.</p></div>
+  {{end}}
+{{end}}
+
+{{end}}

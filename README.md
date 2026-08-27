@@ -159,9 +159,19 @@ results inline, claim holders and expired leases flagged, then issues and
 status reports. Server-rendered HTML with no build step, no JavaScript
 and no external assets — one binary and one embedded template.
 
-A sticky top nav jumps to the three sections — Milestones, Tasks, Issues
-— each with a live count. State is a **table column**, not a tag inside
-the title: `pending`/`shipped` and the claim holder each get their own
+The sticky top nav **selects which table is on screen** — Milestones,
+Tasks, Issues (and Reports when any exist) — rather than scrolling to it,
+so exactly one is rendered at a time. It is server-side via `?view=`, so
+each tab is a real URL that can be linked and reloaded, and it needs no
+JavaScript.
+
+Task and issue rows show no body text. Clicking one opens
+`/task/{id}` or `/issue/{id}`, a page that renders the markdown at
+reading size — headings, code blocks and tables full width — with the
+record's fields as a header strip and, for a task, every result reported
+against it below. `/report/{id}` does the same for a status report.
+
+State is a **table column**, not a tag inside the title: `pending`/`shipped` and the claim holder each get their own
 column so a row can be scanned down rather than read across. Only
 `pending`/`shipped` are colour-coded, because those are booleans the
 server actually derives; a milestone's `state` is an open-ended string

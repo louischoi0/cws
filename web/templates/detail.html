@@ -1,0 +1,41 @@
+{{define "content"}}
+{{with .Detail}}
+  <a class="back" href="/?view={{.BackView}}">← {{.BackLabel}}</a>
+
+  <h1 class="detail">{{.Title}}</h1>
+
+  <div class="meta">
+    {{range .Meta}}
+      <span class="k">{{.Key}}</span>
+      {{if eq .Kind "state"}}
+        <span class="st-{{.Value}}"><span class="dot"></span>{{.Value}}</span>
+      {{else if eq .Kind "plain"}}
+        <span>{{.Value}}</span>
+      {{else}}
+        <span class="chip{{if eq .Kind "mono"}} mono{{end}}">{{.Value}}</span>
+      {{end}}
+    {{end}}
+  </div>
+
+  {{if .Content}}
+    <div class="doc">{{markdown .Content}}</div>
+  {{else}}
+    <div class="card"><p class="empty">This record has no content.</p></div>
+  {{end}}
+
+  {{if .Results}}
+    <div class="results">
+      <h2 class="sec">Results <span class="n">{{len .Results}}</span></h2>
+      {{range .Results}}
+        <div class="result-card">
+          <div class="rhead">
+            <span class="st">{{.Status}}</span>
+            <span class="when">{{shortTime .CompletedAt}}</span>
+          </div>
+          <div class="doc">{{markdown .Content}}</div>
+        </div>
+      {{end}}
+    </div>
+  {{end}}
+{{end}}
+{{end}}

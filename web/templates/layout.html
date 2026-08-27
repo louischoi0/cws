@@ -1,10 +1,11 @@
-<!doctype html>
+{{define "layout"}}<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>cws — overview</title>
+<title>{{if .Detail}}{{.Detail.Title}} — cws{{else}}cws — overview{{end}}</title>
 <style>
+
   :root {
     --bg: #f7f7f5; --panel: #fff; --ink: #14140f; --muted: #5c5c55;
     --faint: #6f6f68; --line: #dededa; --line-soft: #eeeeea;
@@ -221,23 +222,93 @@
     td.claim, th.claim, td.num, th.num, td.opt, th.opt { display: none; }
     .nav .meta { display: none; }
   }
+  /* ---- tabs -------------------------------------------------------- */
+  /* The nav selects which table is on screen rather than scrolling to it,
+     so only one is rendered at a time. Server-side via ?view= — no JS, and
+     each tab is a real URL that can be linked and reloaded. */
+  .nav a.on {
+    background: var(--accent-bg); color: var(--accent);
+    border-color: var(--accent-line);
+  }
+  .nav a.on .count { background: var(--panel); color: var(--accent); }
+
+  /* ---- clickable rows ---------------------------------------------- */
+  a.rowlink { color: inherit; text-decoration: none; display: inline-block; }
+  a.rowlink:hover .title { color: var(--accent); text-decoration: underline;
+                           text-underline-offset: .16em; }
+  tbody tr:hover { background: var(--accent-bg); }
+  .go { color: var(--faint); font-size: .78rem; margin-left: .35rem; }
+
+  /* ---- detail page -------------------------------------------------- */
+  .back { display: inline-block; margin: 1.4rem 0 .6rem; color: var(--accent);
+          text-decoration: none; font-size: .85rem; font-weight: 550; }
+  .back:hover { text-decoration: underline; text-underline-offset: .16em; }
+  h1.detail { font-size: 1.6rem; font-weight: 700; letter-spacing: -.025em;
+              margin: .2rem 0 .7rem; line-height: 1.25; }
+  .meta { display: flex; flex-wrap: wrap; gap: .45rem .5rem; margin-bottom: 1.3rem;
+          align-items: center; }
+  .meta .k { color: var(--faint); font-size: .74rem; text-transform: uppercase;
+             letter-spacing: .06em; margin-right: -.2rem; }
+
+  /* The detail page is where the document is actually read, so the box
+     drops its inset framing and the type steps up to reading size. */
+  .doc { font-size: 1rem; line-height: 1.72; color: var(--ink);
+         background: var(--panel); border: 1px solid var(--line);
+         border-left: 3px solid var(--accent); border-radius: 10px;
+         padding: 1.6rem 1.8rem; }
+  .doc h1 { font-size: 1.5rem; margin: 1.4rem 0 .6rem; }
+  .doc h2 { font-size: 1.25rem; margin: 1.3rem 0 .55rem; }
+  .doc h3 { font-size: 1.08rem; margin: 1.2rem 0 .5rem; }
+  .doc h1, .doc h2, .doc h3, .doc h4, .doc h5, .doc h6 {
+    color: var(--accent); font-weight: 700; letter-spacing: -.015em;
+    text-transform: none; border: 0; padding: 0; display: block; }
+  .doc > :first-child { margin-top: 0; }
+  .doc > :last-child { margin-bottom: 0; }
+  .doc p, .doc ul, .doc ol, .doc blockquote, .doc table { margin: .8rem 0; }
+  .doc ul, .doc ol { padding-left: 1.5rem; }
+  .doc li { margin: .3rem 0; }
+  .doc code { background: var(--md-code); color: var(--ink); padding: .12rem .35rem;
+              border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+              font-size: .88em; }
+  .doc pre { background: var(--md-code); border: 1px solid var(--md-line);
+             border-radius: 8px; padding: .9rem 1.05rem; overflow-x: auto; margin: .9rem 0;
+             font-size: .88rem; line-height: 1.55; }
+  .doc pre code { background: none; padding: 0; font-size: 1em; }
+  .doc blockquote { border-left: 3px solid var(--md-line); padding-left: 1rem;
+                    margin-left: 0; color: var(--muted); }
+  .doc a { color: var(--accent); text-underline-offset: .16em; }
+  .doc table { border-collapse: collapse; width: auto; font-size: .93em; }
+  .doc th, .doc td { border: 1px solid var(--md-line); padding: .42rem .7rem;
+                     background: none; text-transform: none; letter-spacing: 0;
+                     color: var(--ink); width: auto; font-family: inherit; font-size: 1em; }
+  .doc th { background: var(--md-code); font-weight: 700; }
+  .doc img { max-width: 100%; }
+  .doc hr { border: 0; border-top: 1px solid var(--md-line); margin: 1.2rem 0; }
+
+  .results { margin-top: 2.2rem; }
+  .result-card { background: var(--panel); border: 1px solid var(--line);
+                 border-radius: 10px; padding: 1rem 1.2rem; margin-bottom: .8rem; }
+  .result-card .rhead { display: flex; align-items: baseline; gap: .55rem;
+                        margin-bottom: .5rem; }
+  .result-card .rhead .st { color: var(--accent); font-weight: 650; font-size: .92rem; }
+  .result-card .rhead .when { color: var(--faint); font-size: .8rem; margin-left: auto; }
+
 </style>
 </head>
 <body>
 
 <nav class="nav">
   <div class="nav-inner">
-    <span class="brand">cws<span>read-only</span></span>
-    <a href="#milestones">Milestones <span class="count">{{.TotalMilestones}}</span></a>
-    <a href="#tasks">Tasks <span class="count">{{.TotalPending}}/{{.TotalTasks}}</span></a>
-    <a href="#issues">Issues <span class="count">{{.TotalIssues}}</span></a>
-    {{if .IssueReports}}<a href="#reports">Reports <span class="count">{{.TotalReports}}</span></a>{{end}}
+    <a class="brand" href="/" style="text-decoration:none">cws<span>read-only</span></a>
+    <a href="/?view=milestones" class="{{if eq .View "milestones"}}on{{end}}">Milestones <span class="count">{{.TotalMilestones}}</span></a>
+    <a href="/?view=tasks" class="{{if eq .View "tasks"}}on{{end}}">Tasks <span class="count">{{.TotalPending}}/{{.TotalTasks}}</span></a>
+    <a href="/?view=issues" class="{{if eq .View "issues"}}on{{end}}">Issues <span class="count">{{.TotalIssues}}</span></a>
+    {{if .TotalReports}}<a href="/?view=reports" class="{{if eq .View "reports"}}on{{end}}">Reports <span class="count">{{.TotalReports}}</span></a>{{end}}
     <span class="meta">{{.APIBase}} · {{.FetchedAt}}</span>
   </div>
 </nav>
 
 <main>
-
   {{if .Err}}
     <div class="err">
       <strong>Cannot read the API.</strong>
@@ -246,180 +317,11 @@
          data of its own and no database handle.</p>
     </div>
   {{end}}
-
-  <!-- ============================ MILESTONES ==================== -->
-  <h2 class="sec" id="milestones">Milestones <span class="n">{{.TotalMilestones}}</span></h2>
-  {{if .Milestones}}
-    <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>id</th><th>state</th><th>milestone</th><th>version</th><th>directory</th><th class="when">updated</th>
-          </tr>
-        </thead>
-        <tbody>
-        {{range .Milestones}}
-          <tr>
-            <td class="id">{{.ID}}</td>
-            <td class="state"><span class="s-free"><span class="dot"></span>{{.State}}</span></td>
-            <td class="title">{{.Title}}</td>
-            <td><span class="chip mono">{{.Version}}</span></td>
-            <td class="id">{{.Directory}}</td>
-            <td class="when">{{shortTime .LastUpdatedAt}}</td>
-          </tr>
-        {{end}}
-        </tbody>
-      </table>
-    </div>
-  {{else}}
-    <div class="card"><p class="empty">No milestones.</p></div>
-  {{end}}
-
-  <!-- ============================ TASKS ========================== -->
-  <h2 class="sec" id="tasks">
-    Tasks <span class="n">{{.TotalPending}} pending of {{.TotalTasks}}{{if .TotalClaimed}} · {{.TotalClaimed}} claimed{{end}}</span>
-  </h2>
-
-  {{range .Groups}}
-    <div class="card">
-      <div class="grp-head">
-        {{if .Unassigned}}
-          <span class="name">No milestone</span>
-        {{else}}
-          <span class="name">{{.Milestone.Title}}</span>
-          <span class="chip mono">{{.Milestone.Version}}</span>
-          <span class="dir">{{.Milestone.Directory}}</span>
-        {{end}}
-        <span class="tally">
-          {{.PendingCnt}} pending · {{.ShippedCnt}} shipped{{if .ClaimedCnt}} · {{.ClaimedCnt}} claimed{{end}}
-        </span>
-      </div>
-
-      {{if .Unassigned}}
-        <p class="banner">
-          These carry no milestone_id, so <code>GET /tasks/</code> cannot return
-          them — it requires one. They are reachable only by their own id.
-        </p>
-      {{end}}
-
-      {{if .Tasks}}
-        <table>
-          <thead>
-            <tr>
-              <th>id</th><th>state</th><th class="claim">claim</th>
-              <th>task</th><th>type</th><th class="num">prio</th>
-              <th class="opt">raised</th><th>updated</th>
-            </tr>
-          </thead>
-          <tbody>
-          {{range .Tasks}}
-            <tr>
-              <td class="id">{{.ID}}</td>
-              <td class="state">
-                <span class="st-{{.State}}"><span class="dot"></span>{{.State}}</span>
-              </td>
-              <td class="claim">
-                {{if .ClaimedBy}}
-                  {{if .ClaimExpired}}<span class="c-expired">expired · {{.ClaimedBy}}</span>
-                  {{else}}<span class="c-held">{{.ClaimedBy}}</span>{{end}}
-                {{else}}<span class="c-none">—</span>{{end}}
-              </td>
-              <td>
-                <span class="title">{{.Title}}</span>
-                {{if not .Pending}}<span class="chip">reported</span>{{end}}
-                {{if .DerivedFrom}}<span class="chip">↳ #{{.DerivedFrom}}</span>{{end}}
-                {{if .Content}}
-                  <details>
-                    <summary>content</summary>
-                    <div class="md">{{markdown .Content}}</div>
-                  </details>
-                {{end}}
-                {{if .Results}}
-                  <div class="res">
-                    {{range .Results}}
-                      <div class="res-row">
-                        <span class="st">{{.Status}}</span> · {{shortTime .CompletedAt}}
-                        <div class="md">{{markdown .Content}}</div>
-                      </div>
-                    {{end}}
-                  </div>
-                {{end}}
-              </td>
-              <td><span class="chip">{{.Type}}</span></td>
-              <td class="num">{{if .Priority}}{{.Priority}}{{else}}—{{end}}</td>
-              <td class="when opt">{{shortTime .RaisedAt}}</td>
-              <td class="when">{{shortTime .LastUpdatedAt}}</td>
-            </tr>
-          {{end}}
-          </tbody>
-        </table>
-      {{else}}
-        <p class="empty">No tasks.</p>
-      {{end}}
-    </div>
-  {{else}}
-    {{if not .Err}}
-      <div class="card"><p class="empty">No tasks.</p></div>
-    {{end}}
-  {{end}}
-
-  <!-- ============================ ISSUES ========================= -->
-  <h2 class="sec" id="issues">Issues <span class="n">{{.TotalIssues}}</span></h2>
-  {{if .Issues}}
-    <div class="card">
-      <table>
-        <thead>
-          <tr><th>id</th><th>project</th><th>alias</th><th>issue</th></tr>
-        </thead>
-        <tbody>
-        {{range .Issues}}
-          <tr>
-            <td class="id">{{.ID}}</td>
-            <td><span class="chip">{{.Project}}</span></td>
-            <td class="id">{{.Alias}}</td>
-            <td>
-              <span class="title">{{.Title}}</span>
-              {{if .Content}}
-                <details><summary>content</summary><div class="md">{{markdown .Content}}</div></details>
-              {{end}}
-            </td>
-          </tr>
-        {{end}}
-        </tbody>
-      </table>
-    </div>
-  {{else}}
-    <div class="card"><p class="empty">No issues.</p></div>
-  {{end}}
-
-  <!-- ============================ REPORTS ======================== -->
-  {{if .IssueReports}}
-    <h2 class="sec" id="reports">Status reports <span class="n">{{.TotalReports}}</span></h2>
-    <div class="card">
-      <table>
-        <thead>
-          <tr><th>id</th><th>state</th><th>project</th><th>version</th><th>category</th><th>text</th></tr>
-        </thead>
-        <tbody>
-        {{range .IssueReports}}
-          <tr>
-            <td class="id">{{.ID}}</td>
-            <td class="state"><span class="s-free"><span class="dot"></span>{{.State}}</span></td>
-            <td><span class="chip">{{.Project}}</span></td>
-            <td><span class="chip mono">{{.Version}}</span></td>
-            <td><span class="chip">{{.Category}}</span></td>
-            <td><details><summary>text</summary><div class="md">{{markdown .Text}}</div></details></td>
-          </tr>
-        {{end}}
-        </tbody>
-      </table>
-    </div>
-  {{end}}
-
+  {{template "content" .}}
   <footer>
     Read-only view — nothing on this page writes. Reload to refresh;
     there is no cache between this page and <code>{{.APIBase}}/overview</code>.
   </footer>
 </main>
 </body>
-</html>
+</html>{{end}}
