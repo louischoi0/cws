@@ -70,6 +70,49 @@ const claimLeaseTTL = 30 * time.Minute
 
 var updatedCountRe = regexp.MustCompile(`^UPDATED (\d+)$`)
 
+// taskStateNames maps a task's stored state code to the name the API
+// speaks. The column is an int64 and not a varchar for a hard reason,
+// not a stylistic one: `task` already carries five varchar columns, and
+// at `inline_cell_width = 1600` a sixth pushes the row to 9657 bytes
+// against the 8115 a heap page holds. Lowering the width to fit one
+// would cap every body at ~995 raw bytes, and five rows already stored
+// exceed that — so a varchar state cannot be added without losing
+// content that exists. (KDS's `char` is exactly one byte and takes no
+// length argument, so `char(10)` is not available either.) An int64
+// costs 8 bytes and fits with room to spare.
+//
+// A code's meaning is its position, so **append only** — renaming or
+// reordering an entry silently relabels every row already stored.
+var taskStateNames = []string{
+	"init",       // 0 — what every task is created as
+	"pending",    // 1
+	"inprogress", // 2
+	"done",       // 3
+	"blocked",    // 4
+	"cancelled",  // 5
+}
+
+// taskStateInit is the code every task starts at.
+const taskStateInit = 0
+
+func taskStateName(code int) string {
+	if code < 0 || code >= len(taskStateNames) {
+		// A code this build has no name for is shown as itself rather
+		// than as a guess — an older row, or a newer writer.
+		return fmt.Sprintf("state(%d)", code)
+	}
+	return taskStateNames[code]
+}
+
+func taskStateCode(name string) (int, bool) {
+	for i, n := range taskStateNames {
+		if n == name {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 //go:embed templates/agent-report-protocol.md
 var agentReportTemplateSrc string
 
@@ -142,6 +185,11 @@ type task struct {
 	Priority      *int    `json:"priority"`
 	ClaimedBy     *string `json:"claimed_by"`
 	ClaimedAt     *string `json:"claimed_at"`
+	// State is the explicit, caller-driven workflow state — distinct
+	// from Pending above, which is derived (nothing was ever reported
+	// against this task). They answer different questions and can
+	// legitimately disagree.
+	State string `json:"state"`
 	// ClaimExpired reports whether a held claim is past claimLeaseTTL and
 	// so may be stolen. False when nothing holds the task.
 	ClaimExpired bool `json:"claim_expired"`
@@ -177,6 +225,10 @@ type createResultRequest struct {
 
 type claimRequest struct {
 	Agent string `json:"agent"`
+}
+
+type setStateRequest struct {
+	State string `json:"state"`
 }
 
 // taskPatchable lists the columns PATCH /tasks/{id}/ may write, in a fixed
@@ -233,6 +285,7 @@ func main() {
 	mux.HandleFunc("GET /tasks/{$}", handleListTasks(db))
 	mux.HandleFunc("GET /tasks/{id}/{$}", handleGetTask(db))
 	mux.HandleFunc("PATCH /tasks/{id}/{$}", handleUpdateTask(db))
+	mux.HandleFunc("POST /tasks/{id}/state/{$}", handleSetTaskState(db))
 	mux.HandleFunc("POST /tasks/{id}/claim/{$}", handleClaimTask(db))
 	mux.HandleFunc("POST /tasks/{id}/release/{$}", handleReleaseTask(db))
 	mux.HandleFunc("POST /tasks/{id}/results/{$}", handleCreateResult(db))
@@ -267,7 +320,7 @@ func ensureTables(db *KDSClient) error {
 		{"issues", "CREATE TABLE issues (id int64, project varchar, version varchar, state varchar, category varchar, body varchar) BTREE"},
 		{"issue", "CREATE TABLE issue (id int64, project varchar, alias varchar, title varchar, content varchar) BTREE"},
 		{"milestone", "CREATE TABLE milestone (id int64, title varchar, directory varchar, state varchar, version varchar) BTREE"},
-		{"task", "CREATE TABLE task (id int64, version varchar, title varchar, content varchar, type varchar, raised_at timestamp, last_shipped_at timestamp, derived_from int64 NULL, milestone_id int64 NULL REFERENCES milestone, priority int64 NULL, claimed_by varchar NULL, claimed_at timestamp NULL) BTREE"},
+		{"task", "CREATE TABLE task (id int64, version varchar, title varchar, content varchar, type varchar, raised_at timestamp, last_shipped_at timestamp, derived_from int64 NULL, milestone_id int64 NULL REFERENCES milestone, priority int64 NULL, claimed_by varchar NULL, claimed_at timestamp NULL, state int64) BTREE"},
 		{"result", "CREATE TABLE result (id int64, task_id int64 REFERENCES task, status varchar, content varchar, completed_at timestamp) BTREE"},
 	}
 	for _, t := range tables {
@@ -426,7 +479,7 @@ var helpEndpoints = []helpEndpoint{
 			{"milestone_id", "optional: a milestone's id (string). Engine-enforced FK — 400 if it doesn't exist"},
 			{"priority", "optional: integer, no fixed range or direction"},
 		},
-		Response: "201 with the created task (raised_at/last_shipped_at start equal — that equality is this schema's \"never shipped\" convention, pending is derived from it).",
+		Response: "201 with the created task. raised_at/last_shipped_at start equal — that equality is this schema's \"never shipped\" convention, and `pending` is derived from it. `state` always starts at `init`; it is not settable here, only through POST /tasks/{id}/state/.",
 	},
 	{
 		Method:      "GET",
@@ -436,6 +489,7 @@ var helpEndpoints = []helpEndpoint{
 			{"milestone_id", "REQUIRED, positive integer. 400 without it. GET /milestones/ lists them"},
 			{"pending", "true to list only tasks whose last_shipped_at still equals raised_at (never reported against)"},
 			{"claimable", "true to list only tasks nothing currently holds (unclaimed, or claim expired). Advisory — another agent can claim one between this read and your POST; the claim call is what decides"},
+			{"state", "exact workflow state; one of: " + strings.Join(taskStateNames, ", ")},
 		},
 		Response: "JSON array of tasks, or 400 if milestone_id is missing or malformed.",
 	},
@@ -461,6 +515,14 @@ var helpEndpoints = []helpEndpoint{
 		Description: "Fetches one task by id.",
 		PathParams:  []helpParam{{"id", "positive integer"}},
 		Response:    "the task, or 404.",
+	},
+	{
+		Method:      "POST",
+		Path:        "/tasks/{id}/state/",
+		Description: "Moves a task through its workflow. State is stored as an int64 code and spoken as a name; every task is created as `init` and can only change here — PATCH refuses the field, because a transition is not a field edit. No transition table is enforced: done -> inprogress is legal, since work reopens.",
+		PathParams:  []helpParam{{"id", "positive integer"}},
+		Body:        []helpParam{{"state", "one of: " + strings.Join(taskStateNames, ", ")}},
+		Response:    "the full updated task, 404 if no such task, 400 if the state name is unknown (the message lists them).",
 	},
 	{
 		Method:      "POST",
@@ -1066,8 +1128,11 @@ func handleCreateTask(db *KDSClient) http.HandlerFunc {
 		// raised_at == last_shipped_at, not an absent value.
 		// handleListTasks derives Pending from the same equality.
 		now := kdsTimestampLiteral(time.Now())
-		stmt := fmt.Sprintf("INSERT INTO task VALUES ('%s', '%s', '%s', '%s', '%s', '%s', %s, %s, %s, NULL, NULL)",
-			req.Version, req.Title, content, req.Type, now, now, derivedFromLiteral, milestoneIDLiteral, priorityLiteral)
+		// state always starts at init; it moves only through
+		// POST /tasks/{id}/state/, never at creation.
+		stmt := fmt.Sprintf("INSERT INTO task VALUES ('%s', '%s', '%s', '%s', '%s', '%s', %s, %s, %s, NULL, NULL, %d)",
+			req.Version, req.Title, content, req.Type, now, now,
+			derivedFromLiteral, milestoneIDLiteral, priorityLiteral, taskStateInit)
 		reply, err := db.Exec(stmt)
 		if err != nil {
 			if strings.Contains(err.Error(), "FK_VIOLATION") {
@@ -1093,6 +1158,7 @@ func handleCreateTask(db *KDSClient) http.HandlerFunc {
 			DerivedFrom:   req.DerivedFrom,
 			MilestoneID:   req.MilestoneID,
 			Priority:      req.Priority,
+			State:         taskStateName(taskStateInit),
 		})
 	}
 }
@@ -1130,6 +1196,21 @@ func handleListTasks(db *KDSClient) http.HandlerFunc {
 			filtered := tasks[:0]
 			for _, t := range tasks {
 				if t.Pending {
+					filtered = append(filtered, t)
+				}
+			}
+			tasks = filtered
+		}
+
+		if want := r.URL.Query().Get("state"); want != "" {
+			if _, ok := taskStateCode(want); !ok {
+				http.Error(w, fmt.Sprintf("unknown state %q: one of %s",
+					want, strings.Join(taskStateNames, ", ")), http.StatusBadRequest)
+				return
+			}
+			filtered := tasks[:0]
+			for _, t := range tasks {
+				if t.State == want {
 					filtered = append(filtered, t)
 				}
 			}
@@ -1211,8 +1292,17 @@ func handleUpdateTask(db *KDSClient) http.HandlerFunc {
 		}
 		if len(unknown) > 0 {
 			sort.Strings(unknown)
-			http.Error(w, fmt.Sprintf("cannot patch %s; patchable fields are %s",
-				strings.Join(unknown, ", "), strings.Join(taskPatchable, ", ")), http.StatusBadRequest)
+			msg := fmt.Sprintf("cannot patch %s; patchable fields are %s",
+				strings.Join(unknown, ", "), strings.Join(taskPatchable, ", "))
+			for _, k := range unknown {
+				switch k {
+				case "state":
+					msg += ". Use POST /tasks/{id}/state/ to move a task's state"
+				case "claimed_by", "claimed_at":
+					msg += ". Use POST /tasks/{id}/claim/ and .../release/ for the lease"
+				}
+			}
+			http.Error(w, msg, http.StatusBadRequest)
 			return
 		}
 
@@ -1355,6 +1445,45 @@ func handleUpdateTask(db *KDSClient) http.HandlerFunc {
 			return
 		}
 
+		respondClaimed(w, db, id)
+	}
+}
+
+// handleSetTaskState moves a task through its workflow. State lives
+// behind its own endpoint rather than in PATCH for the same reason a
+// claim does: it is a transition, not a field edit, and keeping one path
+// per concern means there is exactly one place a state can change.
+func handleSetTaskState(db *KDSClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := pathID(w, r)
+		if !ok {
+			return
+		}
+
+		var req setStateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		code, known := taskStateCode(req.State)
+		if !known {
+			http.Error(w, fmt.Sprintf("unknown state %q: one of %s",
+				req.State, strings.Join(taskStateNames, ", ")), http.StatusBadRequest)
+			return
+		}
+
+		// Any state may follow any other: no transition table is enforced,
+		// because nothing here knows enough to rule one out — a task can
+		// legitimately go done -> inprogress when work reopens.
+		reply, err := db.Exec(fmt.Sprintf("UPDATE task SET state = %d WHERE id = %s", code, id))
+		if err != nil {
+			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		if updatedCount(reply) != 1 {
+			http.Error(w, "task not found", http.StatusNotFound)
+			return
+		}
 		respondClaimed(w, db, id)
 	}
 }
@@ -1689,12 +1818,12 @@ func parseMilestoneRows(reply string) ([]milestone, error) {
 
 // parseTaskRows decodes `task`'s column order: id, version, title, content,
 // type, raised_at, last_shipped_at, derived_from, milestone_id, priority,
-// claimed_by, claimed_at.
+// claimed_by, claimed_at, state.
 func parseTaskRows(reply string) ([]task, error) {
 	rows := splitSelectRows(reply)
 	tasks := make([]task, 0, len(rows))
 	for _, cols := range rows {
-		if len(cols) != 12 {
+		if len(cols) != 13 {
 			return nil, fmt.Errorf("unexpected row shape: %v", cols)
 		}
 		raw, err := base64.StdEncoding.DecodeString(cols[3])
@@ -1735,6 +1864,10 @@ func parseTaskRows(reply string) ([]task, error) {
 				claimExpired = time.Since(t) > claimLeaseTTL
 			}
 		}
+		stateCode, err := strconv.Atoi(cols[12])
+		if err != nil {
+			return nil, fmt.Errorf("decode state: %w", err)
+		}
 		tasks = append(tasks, task{
 			ID:            cols[0],
 			Version:       cols[1],
@@ -1750,6 +1883,7 @@ func parseTaskRows(reply string) ([]task, error) {
 			ClaimedBy:     claimedBy,
 			ClaimedAt:     claimedAt,
 			ClaimExpired:  claimExpired,
+			State:         taskStateName(stateCode),
 			claimedAtRaw:  claimedAtRaw,
 		})
 	}

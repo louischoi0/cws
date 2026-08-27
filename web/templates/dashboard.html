@@ -132,6 +132,15 @@
   .s-pending { color: var(--warn); } .s-pending .dot { background: var(--warn); }
   .s-shipped { color: var(--faint); font-weight: 500; } .s-shipped .dot { background: var(--faint); }
   .s-free    { color: var(--ink); font-weight: 550; } .s-free .dot { background: var(--muted); }
+  /* Explicit workflow states. `init` is deliberately quiet — it means
+     nobody has said anything about this task yet. */
+  .st-init       { color: var(--faint); font-weight: 500; } .st-init .dot { background: var(--faint); }
+  .st-pending    { color: var(--warn); }  .st-pending .dot { background: var(--warn); }
+  .st-inprogress { color: var(--accent); } .st-inprogress .dot { background: var(--accent); }
+  .st-done       { color: var(--muted); } .st-done .dot { background: var(--muted); }
+  .st-blocked    { color: var(--hot); }   .st-blocked .dot { background: var(--hot); }
+  .st-cancelled  { color: var(--faint); text-decoration: line-through; }
+  .st-cancelled .dot { background: var(--faint); }
 
   td.claim { width: 9.5rem; font-size: .82rem; white-space: nowrap; }
   .c-held { color: var(--accent); font-weight: 550; }
@@ -305,8 +314,7 @@
             <tr>
               <td class="id">{{.ID}}</td>
               <td class="state">
-                {{if .Pending}}<span class="s-pending"><span class="dot"></span>pending</span>
-                {{else}}<span class="s-shipped"><span class="dot"></span>shipped</span>{{end}}
+                <span class="st-{{.State}}"><span class="dot"></span>{{.State}}</span>
               </td>
               <td class="claim">
                 {{if .ClaimedBy}}
@@ -316,6 +324,7 @@
               </td>
               <td>
                 <span class="title">{{.Title}}</span>
+                {{if not .Pending}}<span class="chip">reported</span>{{end}}
                 {{if .DerivedFrom}}<span class="chip">↳ #{{.DerivedFrom}}</span>{{end}}
                 {{if .Content}}
                   <details>

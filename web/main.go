@@ -81,6 +81,7 @@ type task struct {
 	ClaimedBy     *string `json:"claimed_by"`
 	ClaimedAt     *string `json:"claimed_at"`
 	ClaimExpired  bool    `json:"claim_expired"`
+	State         string  `json:"state"`
 }
 
 type result struct {

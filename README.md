@@ -86,6 +86,13 @@ file could.
   `milestone_id` (nullable) *is* an enforced FK, since it references a
   different table. `priority` (nullable integer) has no fixed range or
   direction — a caller convention, not an engine one.
+- `POST /tasks/{id}/state/` — moves a task through its workflow:
+  `init` (where every task is created) → `pending` / `inprogress` /
+  `done` / `blocked` / `cancelled`. No transition table is enforced, so
+  `done` → `inprogress` is legal — work reopens. Stored as an int64 code
+  and spoken as a name (see `CLAUDE.md` for why); `PATCH` refuses the
+  field, because a transition is not a field edit. `GET /tasks/?state=`
+  filters on it.
 - `POST /tasks/{id}/claim/`, `POST /tasks/{id}/release/` — an exclusive
   lease on a task, so two concurrent sessions never work the same one.
   Claiming is atomic under concurrency (a compare-and-swap; see

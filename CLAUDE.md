@@ -64,6 +64,7 @@ one; `issue` still has no such column — that half of the gap remains.
 | `priority` | integer, nullable | no fixed range or direction (not documented as "lower is more urgent" or the reverse) — a caller convention, not an engine one |
 | `claimed_by` | string, nullable | which agent currently holds an exclusive lease on this task (see below); NULL when nobody does |
 | `claimed_at` | timestamp, KST (UTC+9), nullable | when that lease was taken or last refreshed |
+| `state` | **integer code**, rendered as a name | the explicit workflow state: `init` (every task starts here), `pending`, `inprogress`, `done`, `blocked`, `cancelled`. Moved only by `POST /tasks/{id}/state/`; `PATCH` refuses it by name |
 
 **Claims are leases, and the atomicity is a compare-and-swap.** KDS
 offers no `SELECT ... FOR UPDATE` and no `RETURNING`, so
@@ -82,6 +83,22 @@ evaluated by anyone but the claimer) may be stolen. A live agent
 refreshes by claiming again; that is the only heartbeat. Reporting a
 result releases the claim unconditionally, in the same transaction as
 the insert.
+
+**Why `state` is an int and not a varchar.** It is not a style choice.
+`task` already carries five varchar columns, and at
+`inline_cell_width = 1600` a sixth takes the row to 9657 bytes against
+the 8115 a heap page holds. The width would have to drop to ~1343, which
+caps every stored body at ~995 raw bytes — and five rows already stored
+exceed that, so a varchar `state` could not be added without losing
+content that exists. KDS's `char` is exactly one byte and takes no length
+argument (`char(10)` is refused by name), so an int64 code with the name
+mapping in `server/main.go` is what fits. **`taskStateNames` is
+append-only**: a code's meaning is its position, so renaming or
+reordering an entry silently relabels every row already stored.
+
+`state` and `pending` are different facts and may disagree. `pending` is
+derived — nothing was ever reported against this task — while `state` is
+what a caller declared. Neither is computed from the other.
 
 `PATCH /tasks/{id}/` edits a task after creation — `version`, `title`,
 `content`, `type`, `milestone_id`, `priority`, `derived_from`. Only keys
