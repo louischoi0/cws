@@ -147,6 +147,13 @@ results inline, claim holders and expired leases flagged, then issues and
 status reports. Server-rendered HTML with no build step, no JavaScript
 and no external assets — one binary and one embedded template.
 
+Markdown bodies are rendered rather than shown raw, via goldmark with
+**raw HTML left disabled** — task and issue content is written by agents
+and by anything that can POST to the API, so it is untrusted by the time
+it reaches this page. goldmark's defaults drop raw HTML and strip
+`javascript:`/`data:` URLs; `web/markdown_test.go` pins both, and fails
+the moment someone adds `html.WithUnsafe()`.
+
 It reads `GET /overview` on every request and holds nothing between
 them, so reloading is refreshing and there is no cache to go stale.
 Tasks with no `milestone_id` get their own group at the bottom rather

@@ -9,6 +9,7 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -18,15 +19,40 @@ import (
 	"os"
 	"sort"
 	"time"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 )
 
 //go:embed templates/dashboard.html
 var dashboardHTML string
 
+// md renders the markdown bodies the API stores. Raw HTML is left
+// **disabled** — goldmark escapes it unless html.WithUnsafe() is passed,
+// and it is deliberately not passed here. Task and issue content is
+// written by agents and by whoever POSTs to the API, so it is untrusted
+// input; rendering it as live HTML would make this read-only page an
+// injection surface. GFM is on for tables, strikethrough and autolinks,
+// none of which reintroduce raw HTML.
+var md = goldmark.New(goldmark.WithExtensions(extension.GFM))
+
 var dashboardTemplate = template.Must(
 	template.New("dashboard").Funcs(template.FuncMap{
 		"shortTime": shortTime,
+		"markdown":  renderMarkdown,
 	}).Parse(dashboardHTML))
+
+// renderMarkdown converts stored markdown to HTML for the page. On a
+// conversion failure it falls back to the escaped source text rather than
+// dropping the content — a body that will not parse is still something
+// the reader needs to see.
+func renderMarkdown(src string) template.HTML {
+	var buf bytes.Buffer
+	if err := md.Convert([]byte(src), &buf); err != nil {
+		return template.HTML(template.HTMLEscapeString(src))
+	}
+	return template.HTML(buf.String())
+}
 
 // The shapes below mirror the API's JSON. They are deliberately a
 // separate declaration rather than an import of the server package: the

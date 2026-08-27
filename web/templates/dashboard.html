@@ -66,7 +66,34 @@
                 background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
                 padding: .6rem .7rem; font-size: .82rem; }
   .res { margin: .45rem 0 0; padding-left: .8rem; border-left: 2px solid var(--line); }
-  .res div { font-size: .82rem; color: var(--muted); margin-bottom: .2rem; }
+  .res > div { font-size: .82rem; color: var(--muted); margin-bottom: .35rem; }
+
+  /* Rendered markdown. Kept tight so a long body stays scannable inside a
+     table cell, and bounded so a wide code block or table scrolls itself
+     instead of stretching the page. */
+  .md { margin: .5rem 0 .25rem; padding: .6rem .75rem; font-size: .85rem;
+        background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+        overflow-x: auto; }
+  .md > :first-child { margin-top: 0; }
+  .md > :last-child { margin-bottom: 0; }
+  .md p, .md ul, .md ol, .md blockquote, .md table { margin: .45rem 0; }
+  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
+    margin: .8rem 0 .35rem; font-size: .9rem; font-weight: 600;
+    text-transform: none; letter-spacing: 0; color: var(--ink); }
+  .md ul, .md ol { padding-left: 1.3rem; }
+  .md li { margin: .15rem 0; }
+  .md code { background: var(--chip); padding: .08rem .3rem; border-radius: 4px;
+             font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
+  .md pre { background: var(--chip); border-radius: 6px; padding: .55rem .7rem;
+            overflow-x: auto; margin: .5rem 0; }
+  .md pre code { background: none; padding: 0; }
+  .md blockquote { border-left: 3px solid var(--line); padding-left: .7rem;
+                   margin-left: 0; color: var(--muted); }
+  .md a { color: var(--accent); }
+  .md table { border-collapse: collapse; width: auto; font-size: .95em; }
+  .md th, .md td { border: 1px solid var(--line); padding: .3rem .5rem; }
+  .md img { max-width: 100%; }
+  .md hr { border: 0; border-top: 1px solid var(--line); margin: .7rem 0; }
 
   .empty { padding: 1.1rem; color: var(--muted); font-size: .88rem; }
   .note { color: var(--muted); font-size: .8rem; padding: .5rem 1.1rem .8rem; }
@@ -138,7 +165,7 @@
                 {{if .Content}}
                   <details>
                     <summary>content</summary>
-                    <pre>{{.Content}}</pre>
+                    <div class="md">{{markdown .Content}}</div>
                   </details>
                 {{end}}
                 {{if .Results}}
@@ -146,7 +173,8 @@
                     {{range .Results}}
                       <div>
                         <span class="chip">{{.Status}}</span>
-                        {{shortTime .CompletedAt}} — {{.Content}}
+                        {{shortTime .CompletedAt}}
+                        <div class="md">{{markdown .Content}}</div>
                       </div>
                     {{end}}
                   </div>
@@ -180,7 +208,7 @@
             <td>
               <span class="title">{{.Title}}</span>
               {{if .Content}}
-                <details><summary>content</summary><pre>{{.Content}}</pre></details>
+                <details><summary>content</summary><div class="md">{{markdown .Content}}</div></details>
               {{end}}
             </td>
           </tr>
@@ -201,7 +229,7 @@
             <td>{{.Version}}</td>
             <td>{{.State}}</td>
             <td>{{.Category}}</td>
-            <td><details><summary>text</summary><pre>{{.Text}}</pre></details></td>
+            <td><details><summary>text</summary><div class="md">{{markdown .Text}}</div></details></td>
           </tr>
         {{end}}
       </table>
