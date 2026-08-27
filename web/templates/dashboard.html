@@ -8,7 +8,7 @@
   :root {
     --bg: #f7f7f5; --panel: #fff; --ink: #14140f; --muted: #5c5c55;
     --faint: #8a8a82; --line: #dededa; --line-soft: #eeeeea;
-    --accent: #1f6b45; --accent-bg: #e6f2ea;
+    --accent: #0e6b66; --accent-bg: #e2f1ef; --accent-line: #b9dedb;
     --warn: #8a4b00; --warn-bg: #fbeedd;
     --hot: #9b2c1c; --hot-bg: #fbe6e2;
     --chip: #edede8; --stripe: #fafaf8;
@@ -17,7 +17,7 @@
     :root {
       --bg: #121210; --panel: #1c1c19; --ink: #f2f2ec; --muted: #a6a69d;
       --faint: #7e7e76; --line: #35352f; --line-soft: #292924;
-      --accent: #74c99b; --accent-bg: #17301f;
+      --accent: #6ed3c8; --accent-bg: #142e2c; --accent-line: #2c5652;
       --warn: #e0a851; --warn-bg: #332612;
       --hot: #f08a76; --hot-bg: #331e19;
       --chip: #2b2b26; --stripe: #191916;
@@ -35,36 +35,38 @@
   /* ---- top nav ---------------------------------------------------- */
   .nav {
     position: sticky; top: 0; z-index: 10;
-    background: var(--panel); /* fallback where color-mix is unsupported */
-    background: color-mix(in srgb, var(--panel) 92%, transparent);
+    background: var(--accent-bg); /* fallback where color-mix is unsupported */
+    background: color-mix(in srgb, var(--accent-bg) 88%, transparent);
     backdrop-filter: blur(8px);
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--accent-line);
   }
   .nav-inner {
     max-width: 1120px; margin: 0 auto; padding: .7rem 1.25rem;
     display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
   }
-  .brand { font-weight: 650; font-size: 1rem; letter-spacing: -.02em; margin-right: .6rem; }
-  .brand span { color: var(--faint); font-weight: 400; font-size: .8rem; margin-left: .4rem; }
+  .brand { font-weight: 650; font-size: 1rem; letter-spacing: -.02em;
+           margin-right: .6rem; color: var(--accent); }
+  .brand span { color: var(--muted); font-weight: 400; font-size: .8rem; margin-left: .4rem; }
   .nav a {
     display: inline-flex; align-items: center; gap: .4rem;
     padding: .32rem .7rem; border-radius: 7px; text-decoration: none;
-    color: var(--muted); font-size: .88rem; font-weight: 500;
+    color: var(--accent); font-size: .88rem; font-weight: 550;
     border: 1px solid transparent;
   }
-  .nav a:hover { background: var(--chip); color: var(--ink); border-color: var(--line); }
+  .nav a:hover { background: var(--panel); border-color: var(--accent-line); }
   .nav .count {
-    background: var(--chip); color: var(--faint); border-radius: 999px;
+    background: var(--panel); color: var(--accent); border-radius: 999px;
     padding: 0 .38rem; font-size: .74rem; font-weight: 600; font-variant-numeric: tabular-nums;
+    border: 1px solid var(--accent-line);
   }
-  .nav a:hover .count { color: var(--muted); }
-  .nav .meta { margin-left: auto; color: var(--faint); font-size: .76rem; }
+  .nav .meta { margin-left: auto; color: var(--muted); font-size: .76rem; }
 
   /* ---- sections --------------------------------------------------- */
   h2.sec {
     font-size: 1.15rem; font-weight: 650; letter-spacing: -.02em;
+    color: var(--accent);
     margin: 2.4rem 0 .9rem; padding-bottom: .45rem;
-    border-bottom: 2px solid var(--line);
+    border-bottom: 2px solid var(--accent-line);
     display: flex; align-items: baseline; gap: .55rem;
   }
   h2.sec:first-of-type { margin-top: 1.4rem; }
@@ -111,8 +113,8 @@
                   border-radius: 50%; margin-right: .38rem; vertical-align: .04rem; }
   /* Only pending/shipped get a semantic colour: those are booleans the
      server actually derives. A milestone's or a report's `state` is an
-     open-ended string the server never validates, so colouring one green
-     would assert a meaning ("this is fine") that nothing checked — it is
+     open-ended string the server never validates, so colouring one with the
+     accent would assert a meaning ("this is fine") that nothing checked — it is
      shown neutral instead. */
   .s-pending { color: var(--warn); } .s-pending .dot { background: var(--warn); }
   .s-shipped { color: var(--faint); font-weight: 500; } .s-shipped .dot { background: var(--faint); }
