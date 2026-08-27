@@ -139,13 +139,21 @@ type milestoneGroup struct {
 
 type pageData struct {
 	Groups       []milestoneGroup
+	Milestones   []milestone
 	Issues       []issue
 	IssueReports []issueReport
 	APIBase      string
 	FetchedAt    string
 	Err          string
-	TotalTasks   int
-	TotalPending int
+
+	// Counts for the nav badges, so a reader can see what each section
+	// holds before scrolling to it.
+	TotalMilestones int
+	TotalTasks      int
+	TotalPending    int
+	TotalClaimed    int
+	TotalIssues     int
+	TotalReports    int
 }
 
 func main() {
@@ -189,12 +197,19 @@ func handleDashboard(apiBase string) http.HandlerFunc {
 		}
 
 		data.Groups = group(ov)
+		data.Milestones = ov.Milestones
 		data.Issues = ov.Issues
 		data.IssueReports = ov.IssueReports
+		data.TotalMilestones = len(ov.Milestones)
 		data.TotalTasks = len(ov.Tasks)
+		data.TotalIssues = len(ov.Issues)
+		data.TotalReports = len(ov.IssueReports)
 		for _, t := range ov.Tasks {
 			if t.Pending {
 				data.TotalPending++
+			}
+			if t.ClaimedBy != nil && !t.ClaimExpired {
+				data.TotalClaimed++
 			}
 		}
 

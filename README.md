@@ -147,6 +147,15 @@ results inline, claim holders and expired leases flagged, then issues and
 status reports. Server-rendered HTML with no build step, no JavaScript
 and no external assets — one binary and one embedded template.
 
+A sticky top nav jumps to the three sections — Milestones, Tasks, Issues
+— each with a live count. State is a **table column**, not a tag inside
+the title: `pending`/`shipped` and the claim holder each get their own
+column so a row can be scanned down rather than read across. Only
+`pending`/`shipped` are colour-coded, because those are booleans the
+server actually derives; a milestone's `state` is an open-ended string
+nothing validates, so colouring it would assert a meaning no check
+stands behind.
+
 Markdown bodies are rendered rather than shown raw, via goldmark with
 **raw HTML left disabled** — task and issue content is written by agents
 and by anything that can POST to the API, so it is untrusted by the time

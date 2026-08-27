@@ -6,80 +6,161 @@
 <title>cws — overview</title>
 <style>
   :root {
-    --bg: #fbfbfa; --panel: #fff; --ink: #1a1a19; --muted: #6b6b66;
-    --line: #e4e4e0; --accent: #2f6f4e; --warn: #9a5b12; --hot: #a33a2a;
-    --chip: #f0f0ec;
+    --bg: #f7f7f5; --panel: #fff; --ink: #14140f; --muted: #5c5c55;
+    --faint: #8a8a82; --line: #dededa; --line-soft: #eeeeea;
+    --accent: #1f6b45; --accent-bg: #e6f2ea;
+    --warn: #8a4b00; --warn-bg: #fbeedd;
+    --hot: #9b2c1c; --hot-bg: #fbe6e2;
+    --chip: #edede8; --stripe: #fafaf8;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #161614; --panel: #1e1e1b; --ink: #ececE6; --muted: #9a9a92;
-      --line: #33332e; --accent: #7fbf9a; --warn: #d6a25f; --hot: #e0806e;
-      --chip: #2a2a26;
+      --bg: #121210; --panel: #1c1c19; --ink: #f2f2ec; --muted: #a6a69d;
+      --faint: #7e7e76; --line: #35352f; --line-soft: #292924;
+      --accent: #74c99b; --accent-bg: #17301f;
+      --warn: #e0a851; --warn-bg: #332612;
+      --hot: #f08a76; --hot-bg: #331e19;
+      --chip: #2b2b26; --stripe: #191916;
     }
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 4.5rem; }
   body {
-    margin: 0; padding: 2rem 1.25rem 4rem; background: var(--bg); color: var(--ink);
-    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15.5px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  main { max-width: 1080px; margin: 0 auto; }
-  h1 { font-size: 1.35rem; margin: 0 0 .2rem; letter-spacing: -.01em; }
-  h2 { font-size: 1.05rem; margin: 0; letter-spacing: -.01em; }
-  h3 { font-size: .95rem; margin: 2.5rem 0 .75rem; color: var(--muted);
-       text-transform: uppercase; letter-spacing: .07em; }
-  .sub { color: var(--muted); font-size: .85rem; margin: 0 0 1.75rem; }
-  .sub code { background: var(--chip); padding: .1rem .35rem; border-radius: 4px; }
+  main { max-width: 1120px; margin: 0 auto; padding: 1.5rem 1.25rem 5rem; }
 
-  .err { background: var(--panel); border: 1px solid var(--hot); border-left-width: 3px;
-         border-radius: 8px; padding: 1rem 1.15rem; margin-bottom: 1.5rem; }
+  /* ---- top nav ---------------------------------------------------- */
+  .nav {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--panel); /* fallback where color-mix is unsupported */
+    background: color-mix(in srgb, var(--panel) 92%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-inner {
+    max-width: 1120px; margin: 0 auto; padding: .7rem 1.25rem;
+    display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
+  }
+  .brand { font-weight: 650; font-size: 1rem; letter-spacing: -.02em; margin-right: .6rem; }
+  .brand span { color: var(--faint); font-weight: 400; font-size: .8rem; margin-left: .4rem; }
+  .nav a {
+    display: inline-flex; align-items: center; gap: .4rem;
+    padding: .32rem .7rem; border-radius: 7px; text-decoration: none;
+    color: var(--muted); font-size: .88rem; font-weight: 500;
+    border: 1px solid transparent;
+  }
+  .nav a:hover { background: var(--chip); color: var(--ink); border-color: var(--line); }
+  .nav .count {
+    background: var(--chip); color: var(--faint); border-radius: 999px;
+    padding: 0 .38rem; font-size: .74rem; font-weight: 600; font-variant-numeric: tabular-nums;
+  }
+  .nav a:hover .count { color: var(--muted); }
+  .nav .meta { margin-left: auto; color: var(--faint); font-size: .76rem; }
+
+  /* ---- sections --------------------------------------------------- */
+  h2.sec {
+    font-size: 1.15rem; font-weight: 650; letter-spacing: -.02em;
+    margin: 2.4rem 0 .9rem; padding-bottom: .45rem;
+    border-bottom: 2px solid var(--line);
+    display: flex; align-items: baseline; gap: .55rem;
+  }
+  h2.sec:first-of-type { margin-top: 1.4rem; }
+  h2.sec .n { color: var(--faint); font-size: .82rem; font-weight: 500; }
+
+  .card { background: var(--panel); border: 1px solid var(--line);
+          border-radius: 10px; overflow: hidden; margin-bottom: 1rem; }
+
+  .grp-head {
+    padding: .7rem 1rem; background: var(--stripe);
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap;
+  }
+  .grp-head .name { font-weight: 600; font-size: .98rem; }
+  .grp-head .dir { color: var(--faint); font-size: .78rem;
+                   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .grp-head .tally { margin-left: auto; color: var(--muted); font-size: .8rem;
+                     font-variant-numeric: tabular-nums; }
+
+  /* ---- tables ----------------------------------------------------- */
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    font-size: .7rem; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--faint); font-weight: 650; text-align: left;
+    padding: .5rem 1rem; border-bottom: 1px solid var(--line);
+    background: var(--panel); white-space: nowrap;
+  }
+  td { padding: .65rem 1rem; text-align: left; vertical-align: top;
+       border-bottom: 1px solid var(--line-soft); }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:nth-child(even) { background: var(--stripe); }
+
+  td.id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          color: var(--faint); width: 3.2rem; font-size: .85rem; }
+  td.when { color: var(--muted); font-size: .8rem; white-space: nowrap; width: 6.5rem;
+            font-variant-numeric: tabular-nums; }
+  td.num { text-align: right; width: 4.5rem; font-variant-numeric: tabular-nums;
+           color: var(--muted); font-size: .85rem; }
+  .title { font-weight: 550; }
+
+  /* State as its own column, not a tag floating in the title. */
+  td.state { width: 6.5rem; white-space: nowrap; font-size: .84rem; font-weight: 600; }
+  td.state .dot { display: inline-block; width: .45rem; height: .45rem;
+                  border-radius: 50%; margin-right: .38rem; vertical-align: .04rem; }
+  /* Only pending/shipped get a semantic colour: those are booleans the
+     server actually derives. A milestone's or a report's `state` is an
+     open-ended string the server never validates, so colouring one green
+     would assert a meaning ("this is fine") that nothing checked — it is
+     shown neutral instead. */
+  .s-pending { color: var(--warn); } .s-pending .dot { background: var(--warn); }
+  .s-shipped { color: var(--faint); font-weight: 500; } .s-shipped .dot { background: var(--faint); }
+  .s-free    { color: var(--ink); font-weight: 550; } .s-free .dot { background: var(--muted); }
+
+  td.claim { width: 9.5rem; font-size: .82rem; white-space: nowrap; }
+  .c-held { color: var(--accent); font-weight: 550; }
+  .c-expired { color: var(--hot); font-weight: 550; }
+  .c-none { color: var(--faint); }
+
+  .chip { display: inline-block; padding: .1rem .45rem; border-radius: 5px;
+          background: var(--chip); color: var(--muted); font-size: .76rem;
+          font-weight: 500; white-space: nowrap; }
+  .chip.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  details { margin-top: .4rem; }
+  details summary { cursor: pointer; color: var(--faint); font-size: .8rem;
+                    user-select: none; }
+  details summary:hover { color: var(--muted); }
+  details[open] summary { color: var(--muted); margin-bottom: .1rem; }
+
+  .res { margin: .5rem 0 0; padding-left: .75rem; border-left: 2px solid var(--line); }
+  .res-row { font-size: .82rem; color: var(--muted); margin-bottom: .4rem; }
+  .res-row .st { color: var(--accent); font-weight: 600; }
+
+  .banner { padding: .6rem 1rem; background: var(--warn-bg); color: var(--warn);
+            font-size: .82rem; border-bottom: 1px solid var(--line); }
+  .empty { padding: 1.1rem; color: var(--faint); font-size: .88rem; }
+
+  .err { background: var(--hot-bg); border: 1px solid var(--hot);
+         border-radius: 10px; padding: 1rem 1.15rem; margin: 1.4rem 0; }
   .err strong { color: var(--hot); }
   .err p { margin: .4rem 0 0; color: var(--muted); font-size: .88rem; }
 
-  .ms { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-        margin-bottom: 1.15rem; overflow: hidden; }
-  .ms-head { padding: .85rem 1.1rem; border-bottom: 1px solid var(--line);
-             display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
-  .ms-head .dir { color: var(--muted); font-size: .8rem; font-family: ui-monospace, monospace; }
-  .counts { margin-left: auto; color: var(--muted); font-size: .82rem; }
+  footer { margin-top: 3rem; color: var(--faint); font-size: .78rem;
+           border-top: 1px solid var(--line); padding-top: .9rem; }
 
-  .chip { display: inline-block; padding: .08rem .45rem; border-radius: 999px;
-          background: var(--chip); color: var(--muted); font-size: .75rem;
-          font-weight: 500; white-space: nowrap; }
-  .chip.state { color: var(--accent); }
-  .chip.pending { color: var(--warn); }
-  .chip.claimed { color: var(--accent); }
-  .chip.expired { color: var(--hot); }
-
-  table { width: 100%; border-collapse: collapse; }
-  td, th { padding: .55rem 1.1rem; text-align: left; vertical-align: top;
-           border-bottom: 1px solid var(--line); }
-  tr:last-child td { border-bottom: 0; }
-  th { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em;
-       color: var(--muted); font-weight: 600; }
-  td.id { font-family: ui-monospace, monospace; color: var(--muted); width: 3rem; }
-  td.when { color: var(--muted); font-size: .82rem; white-space: nowrap; width: 6.5rem; }
-  .title { font-weight: 500; }
-  .shipped .title { color: var(--muted); }
-  details { margin-top: .35rem; }
-  details summary { cursor: pointer; color: var(--muted); font-size: .8rem; }
-  details pre { white-space: pre-wrap; word-break: break-word; margin: .5rem 0 .25rem;
-                background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
-                padding: .6rem .7rem; font-size: .82rem; }
-  .res { margin: .45rem 0 0; padding-left: .8rem; border-left: 2px solid var(--line); }
-  .res > div { font-size: .82rem; color: var(--muted); margin-bottom: .35rem; }
-
-  /* Rendered markdown. Kept tight so a long body stays scannable inside a
-     table cell, and bounded so a wide code block or table scrolls itself
-     instead of stretching the page. */
-  .md { margin: .5rem 0 .25rem; padding: .6rem .75rem; font-size: .85rem;
-        background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
-        overflow-x: auto; }
+  /* ---- rendered markdown ------------------------------------------ */
+  .md { margin: .5rem 0 .25rem; padding: .65rem .8rem; font-size: .86rem;
+        line-height: 1.55; background: var(--bg); border: 1px solid var(--line);
+        border-radius: 7px; overflow-x: auto; }
   .md > :first-child { margin-top: 0; }
   .md > :last-child { margin-bottom: 0; }
   .md p, .md ul, .md ol, .md blockquote, .md table { margin: .45rem 0; }
   .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
-    margin: .8rem 0 .35rem; font-size: .9rem; font-weight: 600;
-    text-transform: none; letter-spacing: 0; color: var(--ink); }
+    margin: .85rem 0 .35rem; font-size: .9rem; font-weight: 650;
+    text-transform: none; letter-spacing: 0; color: var(--ink);
+    border: 0; padding: 0; display: block; }
   .md ul, .md ol { padding-left: 1.3rem; }
   .md li { margin: .15rem 0; }
   .md code { background: var(--chip); padding: .08rem .3rem; border-radius: 4px;
@@ -91,22 +172,32 @@
                    margin-left: 0; color: var(--muted); }
   .md a { color: var(--accent); }
   .md table { border-collapse: collapse; width: auto; font-size: .95em; }
-  .md th, .md td { border: 1px solid var(--line); padding: .3rem .5rem; }
+  .md th, .md td { border: 1px solid var(--line); padding: .3rem .5rem;
+                   background: none; text-transform: none; letter-spacing: 0;
+                   font-size: 1em; color: inherit; }
   .md img { max-width: 100%; }
   .md hr { border: 0; border-top: 1px solid var(--line); margin: .7rem 0; }
 
-  .empty { padding: 1.1rem; color: var(--muted); font-size: .88rem; }
-  .note { color: var(--muted); font-size: .8rem; padding: .5rem 1.1rem .8rem; }
-  footer { margin-top: 2.5rem; color: var(--muted); font-size: .78rem; }
+  @media (max-width: 720px) {
+    td.claim, th.claim, td.num, th.num { display: none; }
+    .nav .meta { display: none; }
+  }
 </style>
 </head>
 <body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <span class="brand">cws<span>read-only</span></span>
+    <a href="#milestones">Milestones <span class="count">{{.TotalMilestones}}</span></a>
+    <a href="#tasks">Tasks <span class="count">{{.TotalPending}}/{{.TotalTasks}}</span></a>
+    <a href="#issues">Issues <span class="count">{{.TotalIssues}}</span></a>
+    {{if .IssueReports}}<a href="#reports">Reports <span class="count">{{.TotalReports}}</span></a>{{end}}
+    <span class="meta">{{.APIBase}} · {{.FetchedAt}}</span>
+  </div>
+</nav>
+
 <main>
-  <h1>cws overview</h1>
-  <p class="sub">
-    read-only · <code>{{.APIBase}}</code> · fetched {{.FetchedAt}}
-    {{if not .Err}} · {{.TotalTasks}} task(s), {{.TotalPending}} pending{{end}}
-  </p>
 
   {{if .Err}}
     <div class="err">
@@ -117,51 +208,85 @@
     </div>
   {{end}}
 
+  <!-- ============================ MILESTONES ==================== -->
+  <h2 class="sec" id="milestones">Milestones <span class="n">{{.TotalMilestones}}</span></h2>
+  {{if .Milestones}}
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>id</th><th>state</th><th>milestone</th><th>version</th><th>directory</th>
+          </tr>
+        </thead>
+        <tbody>
+        {{range .Milestones}}
+          <tr>
+            <td class="id">{{.ID}}</td>
+            <td class="state"><span class="s-free"><span class="dot"></span>{{.State}}</span></td>
+            <td class="title">{{.Title}}</td>
+            <td><span class="chip mono">{{.Version}}</span></td>
+            <td class="id">{{.Directory}}</td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <div class="card"><p class="empty">No milestones.</p></div>
+  {{end}}
+
+  <!-- ============================ TASKS ========================== -->
+  <h2 class="sec" id="tasks">
+    Tasks <span class="n">{{.TotalPending}} pending of {{.TotalTasks}}{{if .TotalClaimed}} · {{.TotalClaimed}} claimed{{end}}</span>
+  </h2>
+
   {{range .Groups}}
-    <section class="ms">
-      <div class="ms-head">
+    <div class="card">
+      <div class="grp-head">
         {{if .Unassigned}}
-          <h2>No milestone</h2>
-          <span class="chip expired">unassigned</span>
+          <span class="name">No milestone</span>
         {{else}}
-          <h2>{{.Milestone.Title}}</h2>
-          <span class="chip state">{{.Milestone.State}}</span>
-          <span class="chip">{{.Milestone.Version}}</span>
+          <span class="name">{{.Milestone.Title}}</span>
+          <span class="chip mono">{{.Milestone.Version}}</span>
           <span class="dir">{{.Milestone.Directory}}</span>
         {{end}}
-        <span class="counts">
+        <span class="tally">
           {{.PendingCnt}} pending · {{.ShippedCnt}} shipped{{if .ClaimedCnt}} · {{.ClaimedCnt}} claimed{{end}}
         </span>
       </div>
 
       {{if .Unassigned}}
-        <p class="note">
-          These carry no <code>milestone_id</code>, so <code>GET /tasks/</code>
-          cannot return them — it requires one. They are reachable only by id.
+        <p class="banner">
+          These carry no milestone_id, so <code>GET /tasks/</code> cannot return
+          them — it requires one. They are reachable only by their own id.
         </p>
       {{end}}
 
       {{if .Tasks}}
         <table>
-          <tr>
-            <th>id</th><th>task</th><th>type</th><th>raised</th>
-          </tr>
+          <thead>
+            <tr>
+              <th>id</th><th>state</th><th class="claim">claim</th>
+              <th>task</th><th>type</th><th class="num">prio</th><th>raised</th>
+            </tr>
+          </thead>
+          <tbody>
           {{range .Tasks}}
-            <tr class="{{if not .Pending}}shipped{{end}}">
+            <tr>
               <td class="id">{{.ID}}</td>
+              <td class="state">
+                {{if .Pending}}<span class="s-pending"><span class="dot"></span>pending</span>
+                {{else}}<span class="s-shipped"><span class="dot"></span>shipped</span>{{end}}
+              </td>
+              <td class="claim">
+                {{if .ClaimedBy}}
+                  {{if .ClaimExpired}}<span class="c-expired">expired · {{.ClaimedBy}}</span>
+                  {{else}}<span class="c-held">{{.ClaimedBy}}</span>{{end}}
+                {{else}}<span class="c-none">—</span>{{end}}
+              </td>
               <td>
                 <span class="title">{{.Title}}</span>
-                {{if .Pending}}<span class="chip pending">pending</span>
-                {{else}}<span class="chip">shipped</span>{{end}}
-                {{if .Priority}}<span class="chip">p{{.Priority}}</span>{{end}}
-                {{if .DerivedFrom}}<span class="chip">↳ from #{{.DerivedFrom}}</span>{{end}}
-                {{if .ClaimedBy}}
-                  {{if .ClaimExpired}}
-                    <span class="chip expired">lease expired · {{.ClaimedBy}}</span>
-                  {{else}}
-                    <span class="chip claimed">held by {{.ClaimedBy}}</span>
-                  {{end}}
-                {{end}}
+                {{if .DerivedFrom}}<span class="chip">↳ #{{.DerivedFrom}}</span>{{end}}
                 {{if .Content}}
                   <details>
                     <summary>content</summary>
@@ -171,9 +296,8 @@
                 {{if .Results}}
                   <div class="res">
                     {{range .Results}}
-                      <div>
-                        <span class="chip">{{.Status}}</span>
-                        {{shortTime .CompletedAt}}
+                      <div class="res-row">
+                        <span class="st">{{.Status}}</span> · {{shortTime .CompletedAt}}
                         <div class="md">{{markdown .Content}}</div>
                       </div>
                     {{end}}
@@ -181,25 +305,31 @@
                 {{end}}
               </td>
               <td><span class="chip">{{.Type}}</span></td>
+              <td class="num">{{if .Priority}}{{.Priority}}{{else}}—{{end}}</td>
               <td class="when">{{shortTime .RaisedAt}}</td>
             </tr>
           {{end}}
+          </tbody>
         </table>
       {{else}}
         <p class="empty">No tasks.</p>
       {{end}}
-    </section>
+    </div>
   {{else}}
     {{if not .Err}}
-      <section class="ms"><p class="empty">No milestones or tasks yet.</p></section>
+      <div class="card"><p class="empty">No tasks.</p></div>
     {{end}}
   {{end}}
 
+  <!-- ============================ ISSUES ========================= -->
+  <h2 class="sec" id="issues">Issues <span class="n">{{.TotalIssues}}</span></h2>
   {{if .Issues}}
-    <h3>Issues</h3>
-    <section class="ms">
+    <div class="card">
       <table>
-        <tr><th>id</th><th>project</th><th>alias</th><th>title</th></tr>
+        <thead>
+          <tr><th>id</th><th>project</th><th>alias</th><th>issue</th></tr>
+        </thead>
+        <tbody>
         {{range .Issues}}
           <tr>
             <td class="id">{{.ID}}</td>
@@ -213,31 +343,40 @@
             </td>
           </tr>
         {{end}}
+        </tbody>
       </table>
-    </section>
+    </div>
+  {{else}}
+    <div class="card"><p class="empty">No issues.</p></div>
   {{end}}
 
+  <!-- ============================ REPORTS ======================== -->
   {{if .IssueReports}}
-    <h3>Status reports</h3>
-    <section class="ms">
+    <h2 class="sec" id="reports">Status reports <span class="n">{{.TotalReports}}</span></h2>
+    <div class="card">
       <table>
-        <tr><th>id</th><th>project</th><th>version</th><th>state</th><th>category</th><th>text</th></tr>
+        <thead>
+          <tr><th>id</th><th>state</th><th>project</th><th>version</th><th>category</th><th>text</th></tr>
+        </thead>
+        <tbody>
         {{range .IssueReports}}
           <tr>
             <td class="id">{{.ID}}</td>
+            <td class="state"><span class="s-free"><span class="dot"></span>{{.State}}</span></td>
             <td><span class="chip">{{.Project}}</span></td>
-            <td>{{.Version}}</td>
-            <td>{{.State}}</td>
-            <td>{{.Category}}</td>
+            <td><span class="chip mono">{{.Version}}</span></td>
+            <td><span class="chip">{{.Category}}</span></td>
             <td><details><summary>text</summary><div class="md">{{markdown .Text}}</div></details></td>
           </tr>
         {{end}}
+        </tbody>
       </table>
-    </section>
+    </div>
   {{end}}
 
   <footer>
-    Read-only view. Nothing on this page writes — reload to refresh.
+    Read-only view — nothing on this page writes. Reload to refresh;
+    there is no cache between this page and <code>{{.APIBase}}/overview</code>.
   </footer>
 </main>
 </body>
