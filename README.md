@@ -9,22 +9,38 @@ instance, built for a Claude-session-loop development workflow.
   built as `ckdbs/build-release/kds_server`.
 - `kds.conf` — this project's KDS instance config; data lives under
   `kds-data/` (gitignored).
-- `server/` — the Go server (`go.mod` module `cws-issues-server`).
+- `server/` — the API server (`go.mod` module `cws-issues-server`).
+- `web/` — the read-only dashboard (`go.mod` module `cws-web`), a
+  **separate service**: it holds no database handle and knows no SQL, it
+  reads the API's `GET /overview` and renders one page. That is what
+  makes read-only a structural property rather than a promise.
 - `templates/` — copy-paste templates (symlinked from `server/templates/`,
   which is what's actually `go:embed`ded into the binary).
 - `.claude/agents/intermediary-agent.md` — the subagent that drives the
   task loop described below; `.claude/agents/reporter-agent.md` — its
   per-iteration callback, syncing project state back to `issue`/`milestone`.
-- `run.sh` — starts `kds_server` then the Go server.
+- `run.sh` — starts all three: `kds_server`, the API, the dashboard. It
+  aborts if `kds_server` dies during startup rather than leaving the
+  other two running against whatever else holds its port.
 
-Run it: `./run.sh` from the repo root (KDS on `127.0.0.1:15432`, HTTP API
-on `0.0.0.0:8080`). Three environment variables override those defaults:
+Run it: `./run.sh` from the repo root. That starts all three processes —
+KDS on `127.0.0.1:19432`, the API on `0.0.0.0:8080`, and the dashboard on
+`0.0.0.0:8081`. Open <http://localhost:8081/> to see everything at once.
+
+The API reads (`server/`):
 
 | Variable | Default | What it sets |
 |---|---|---|
-| `HTTP_ADDR` | `0.0.0.0:8080` | where this server listens |
-| `KDS_ADDR` | `127.0.0.1:15432` | where it reaches `kds_server` |
+| `HTTP_ADDR` | `0.0.0.0:8080` | where the API listens |
+| `KDS_ADDR` | `127.0.0.1:19432` | where it reaches `kds_server` — a project-specific port, deliberately not KDS's default 15432, which ckdbs' own tools and benchmarks use |
 | `PUBLIC_BASE_URL` | the request's `Host` header | the base URL written into `POST /init/{project}/` output — set it when the server is reached through a proxy or a different hostname than it binds |
+
+The dashboard reads (`web/`):
+
+| Variable | Default | What it sets |
+|---|---|---|
+| `HTTP_ADDR` | `0.0.0.0:8081` | where the dashboard listens |
+| `CWS_API` | `http://127.0.0.1:8080` | the API it reads `/overview` from |
 
 ## API
 
@@ -35,6 +51,14 @@ file could.
 
 - `GET /ping` — round-trips KDS's own `PING`, confirming the whole stack
   is up.
+- `GET /overview` — every row of every table in one read-only snapshot,
+  which is what the dashboard consumes. It exists because the scoped
+  endpoints below cannot answer "show me everything": `GET /tasks/`
+  requires a `milestone_id`, `GET /issue/` needs a project name with no
+  way to enumerate projects, and `GET /issues/` needs all four path
+  segments. Unpaginated by design — this is a small operational store,
+  and a partial snapshot presented as a whole one is the failure worth
+  avoiding.
 - `POST /issues/{project}/{version}/{state}/{category}/` and the matching
   `GET` — markdown status reports keyed by those four segments, stored in
   the `issues` table (plural — the original one).
@@ -114,3 +138,19 @@ so the loop's own state changes never get pushed by the worker itself. To
 wire a new project into this loop, run `POST /init/{project}/` against a
 running server and paste the returned text into that project's
 `CLAUDE.md`.
+
+## The dashboard
+
+`web/` is a second service whose only job is showing the above at a
+glance: milestones with their tasks nested under them, each task's
+results inline, claim holders and expired leases flagged, then issues and
+status reports. Server-rendered HTML with no build step, no JavaScript
+and no external assets — one binary and one embedded template.
+
+It reads `GET /overview` on every request and holds nothing between
+them, so reloading is refreshing and there is no cache to go stale.
+Tasks with no `milestone_id` get their own group at the bottom rather
+than being dropped: the API's list endpoint genuinely cannot reach them,
+so a dashboard that hid them too would make them invisible everywhere.
+When the API is unreachable the page renders the error in place rather
+than returning a bare 502 — the operator is already looking here.

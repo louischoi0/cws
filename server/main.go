@@ -204,7 +204,7 @@ type updateMilestoneRequest struct {
 }
 
 func main() {
-	kdsAddr := envOr("KDS_ADDR", "127.0.0.1:15432")
+	kdsAddr := envOr("KDS_ADDR", "127.0.0.1:19432")
 	httpAddr := envOr("HTTP_ADDR", "0.0.0.0:8080")
 
 	db := NewKDSClient(kdsAddr)
@@ -218,6 +218,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /help", handleHelp)
 	mux.HandleFunc("GET /ping", handlePing(db))
+	mux.HandleFunc("GET /overview", handleOverview(db))
 	mux.HandleFunc("POST /init/{project}/{$}", handleInit)
 	mux.HandleFunc("POST /issues/{project}/{version}/{state}/{category}/{$}", handleCreateIssueReport(db))
 	mux.HandleFunc("GET /issues/{project}/{version}/{state}/{category}/{$}", handleListIssueReports(db))
@@ -313,6 +314,12 @@ var helpEndpoints = []helpEndpoint{
 		Path:        "/ping",
 		Description: "Round-trips KDS's own PING, so a caller can tell the whole stack is up, not just this HTTP process.",
 		Response:    `{"kds": "PONG"}, or 502 if KDS is unreachable.`,
+	},
+	{
+		Method:      "GET",
+		Path:        "/overview",
+		Description: "Every row of every table in one read-only snapshot, for a dashboard. Exists because the scoped endpoints cannot answer \"show me everything\": GET /tasks/ requires a milestone_id, GET /issue/ needs a project name with no way to enumerate projects, and GET /issues/ needs all four path segments. Unpaginated by design.",
+		Response:    "{milestones, tasks, results, issues, issue_reports}, each a JSON array in id order.",
 	},
 	{
 		Method:      "POST",
@@ -501,6 +508,86 @@ func handleHelp(w http.ResponseWriter, r *http.Request) {
 		"description": "Issue/milestone/task/result API for the Claude-session-loop workflow, backed by this server's own KDS instance.",
 		"endpoints":   helpEndpoints,
 	})
+}
+
+// handleOverview returns every row of every table in one read-only
+// snapshot. It exists because the scoped endpoints cannot answer "show me
+// everything": GET /tasks/ requires a milestone_id (so a NULL-milestone
+// task is unreachable there), GET /issue/ needs a project name with no way
+// to enumerate projects, and GET /issues/ needs all four path segments.
+// A dashboard needs the whole picture, and assembling it client-side is
+// impossible rather than merely tedious.
+//
+// Deliberately unpaginated: this is a small operational store, and a
+// partial snapshot presented as a complete one is the failure worth
+// avoiding here. If it ever grows past one response, that is a real
+// design decision, not a limit to raise quietly.
+func handleOverview(db *KDSClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		milestonesReply, err := db.Exec("SELECT * FROM milestone ORDER BY id")
+		if err != nil {
+			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		milestones, err := parseMilestoneRows(milestonesReply)
+		if err != nil {
+			http.Error(w, "kds reply (milestone): "+err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		tasksReply, err := db.Exec("SELECT * FROM task ORDER BY id")
+		if err != nil {
+			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		tasks, err := parseTaskRows(tasksReply)
+		if err != nil {
+			http.Error(w, "kds reply (task): "+err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		resultsReply, err := db.Exec("SELECT * FROM result ORDER BY id")
+		if err != nil {
+			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		results, err := parseResultRows(resultsReply)
+		if err != nil {
+			http.Error(w, "kds reply (result): "+err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		issuesReply, err := db.Exec("SELECT * FROM issue ORDER BY id")
+		if err != nil {
+			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		issues, err := parseIssueRows(issuesReply)
+		if err != nil {
+			http.Error(w, "kds reply (issue): "+err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		reportsReply, err := db.Exec("SELECT * FROM issues ORDER BY id")
+		if err != nil {
+			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		reports, err := parseIssueReportRows(reportsReply)
+		if err != nil {
+			http.Error(w, "kds reply (issues): "+err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"milestones":    milestones,
+			"tasks":         tasks,
+			"results":       results,
+			"issues":        issues,
+			"issue_reports": reports,
+		})
+	}
 }
 
 // handlePing round-trips KDS's own PING, so a caller can tell the whole

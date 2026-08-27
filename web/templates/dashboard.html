@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cws — overview</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --panel: #fff; --ink: #1a1a19; --muted: #6b6b66;
+    --line: #e4e4e0; --accent: #2f6f4e; --warn: #9a5b12; --hot: #a33a2a;
+    --chip: #f0f0ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --panel: #1e1e1b; --ink: #ececE6; --muted: #9a9a92;
+      --line: #33332e; --accent: #7fbf9a; --warn: #d6a25f; --hot: #e0806e;
+      --chip: #2a2a26;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1.25rem 4rem; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 1.35rem; margin: 0 0 .2rem; letter-spacing: -.01em; }
+  h2 { font-size: 1.05rem; margin: 0; letter-spacing: -.01em; }
+  h3 { font-size: .95rem; margin: 2.5rem 0 .75rem; color: var(--muted);
+       text-transform: uppercase; letter-spacing: .07em; }
+  .sub { color: var(--muted); font-size: .85rem; margin: 0 0 1.75rem; }
+  .sub code { background: var(--chip); padding: .1rem .35rem; border-radius: 4px; }
+
+  .err { background: var(--panel); border: 1px solid var(--hot); border-left-width: 3px;
+         border-radius: 8px; padding: 1rem 1.15rem; margin-bottom: 1.5rem; }
+  .err strong { color: var(--hot); }
+  .err p { margin: .4rem 0 0; color: var(--muted); font-size: .88rem; }
+
+  .ms { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+        margin-bottom: 1.15rem; overflow: hidden; }
+  .ms-head { padding: .85rem 1.1rem; border-bottom: 1px solid var(--line);
+             display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+  .ms-head .dir { color: var(--muted); font-size: .8rem; font-family: ui-monospace, monospace; }
+  .counts { margin-left: auto; color: var(--muted); font-size: .82rem; }
+
+  .chip { display: inline-block; padding: .08rem .45rem; border-radius: 999px;
+          background: var(--chip); color: var(--muted); font-size: .75rem;
+          font-weight: 500; white-space: nowrap; }
+  .chip.state { color: var(--accent); }
+  .chip.pending { color: var(--warn); }
+  .chip.claimed { color: var(--accent); }
+  .chip.expired { color: var(--hot); }
+
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: .55rem 1.1rem; text-align: left; vertical-align: top;
+           border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: 0; }
+  th { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em;
+       color: var(--muted); font-weight: 600; }
+  td.id { font-family: ui-monospace, monospace; color: var(--muted); width: 3rem; }
+  td.when { color: var(--muted); font-size: .82rem; white-space: nowrap; width: 6.5rem; }
+  .title { font-weight: 500; }
+  .shipped .title { color: var(--muted); }
+  details { margin-top: .35rem; }
+  details summary { cursor: pointer; color: var(--muted); font-size: .8rem; }
+  details pre { white-space: pre-wrap; word-break: break-word; margin: .5rem 0 .25rem;
+                background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+                padding: .6rem .7rem; font-size: .82rem; }
+  .res { margin: .45rem 0 0; padding-left: .8rem; border-left: 2px solid var(--line); }
+  .res div { font-size: .82rem; color: var(--muted); margin-bottom: .2rem; }
+
+  .empty { padding: 1.1rem; color: var(--muted); font-size: .88rem; }
+  .note { color: var(--muted); font-size: .8rem; padding: .5rem 1.1rem .8rem; }
+  footer { margin-top: 2.5rem; color: var(--muted); font-size: .78rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>cws overview</h1>
+  <p class="sub">
+    read-only · <code>{{.APIBase}}</code> · fetched {{.FetchedAt}}
+    {{if not .Err}} · {{.TotalTasks}} task(s), {{.TotalPending}} pending{{end}}
+  </p>
+
+  {{if .Err}}
+    <div class="err">
+      <strong>Cannot read the API.</strong>
+      <p>{{.Err}}</p>
+      <p>This page renders nothing else until that call succeeds — it holds no
+         data of its own and no database handle.</p>
+    </div>
+  {{end}}
+
+  {{range .Groups}}
+    <section class="ms">
+      <div class="ms-head">
+        {{if .Unassigned}}
+          <h2>No milestone</h2>
+          <span class="chip expired">unassigned</span>
+        {{else}}
+          <h2>{{.Milestone.Title}}</h2>
+          <span class="chip state">{{.Milestone.State}}</span>
+          <span class="chip">{{.Milestone.Version}}</span>
+          <span class="dir">{{.Milestone.Directory}}</span>
+        {{end}}
+        <span class="counts">
+          {{.PendingCnt}} pending · {{.ShippedCnt}} shipped{{if .ClaimedCnt}} · {{.ClaimedCnt}} claimed{{end}}
+        </span>
+      </div>
+
+      {{if .Unassigned}}
+        <p class="note">
+          These carry no <code>milestone_id</code>, so <code>GET /tasks/</code>
+          cannot return them — it requires one. They are reachable only by id.
+        </p>
+      {{end}}
+
+      {{if .Tasks}}
+        <table>
+          <tr>
+            <th>id</th><th>task</th><th>type</th><th>raised</th>
+          </tr>
+          {{range .Tasks}}
+            <tr class="{{if not .Pending}}shipped{{end}}">
+              <td class="id">{{.ID}}</td>
+              <td>
+                <span class="title">{{.Title}}</span>
+                {{if .Pending}}<span class="chip pending">pending</span>
+                {{else}}<span class="chip">shipped</span>{{end}}
+                {{if .Priority}}<span class="chip">p{{.Priority}}</span>{{end}}
+                {{if .DerivedFrom}}<span class="chip">↳ from #{{.DerivedFrom}}</span>{{end}}
+                {{if .ClaimedBy}}
+                  {{if .ClaimExpired}}
+                    <span class="chip expired">lease expired · {{.ClaimedBy}}</span>
+                  {{else}}
+                    <span class="chip claimed">held by {{.ClaimedBy}}</span>
+                  {{end}}
+                {{end}}
+                {{if .Content}}
+                  <details>
+                    <summary>content</summary>
+                    <pre>{{.Content}}</pre>
+                  </details>
+                {{end}}
+                {{if .Results}}
+                  <div class="res">
+                    {{range .Results}}
+                      <div>
+                        <span class="chip">{{.Status}}</span>
+                        {{shortTime .CompletedAt}} — {{.Content}}
+                      </div>
+                    {{end}}
+                  </div>
+                {{end}}
+              </td>
+              <td><span class="chip">{{.Type}}</span></td>
+              <td class="when">{{shortTime .RaisedAt}}</td>
+            </tr>
+          {{end}}
+        </table>
+      {{else}}
+        <p class="empty">No tasks.</p>
+      {{end}}
+    </section>
+  {{else}}
+    {{if not .Err}}
+      <section class="ms"><p class="empty">No milestones or tasks yet.</p></section>
+    {{end}}
+  {{end}}
+
+  {{if .Issues}}
+    <h3>Issues</h3>
+    <section class="ms">
+      <table>
+        <tr><th>id</th><th>project</th><th>alias</th><th>title</th></tr>
+        {{range .Issues}}
+          <tr>
+            <td class="id">{{.ID}}</td>
+            <td><span class="chip">{{.Project}}</span></td>
+            <td class="id">{{.Alias}}</td>
+            <td>
+              <span class="title">{{.Title}}</span>
+              {{if .Content}}
+                <details><summary>content</summary><pre>{{.Content}}</pre></details>
+              {{end}}
+            </td>
+          </tr>
+        {{end}}
+      </table>
+    </section>
+  {{end}}
+
+  {{if .IssueReports}}
+    <h3>Status reports</h3>
+    <section class="ms">
+      <table>
+        <tr><th>id</th><th>project</th><th>version</th><th>state</th><th>category</th><th>text</th></tr>
+        {{range .IssueReports}}
+          <tr>
+            <td class="id">{{.ID}}</td>
+            <td><span class="chip">{{.Project}}</span></td>
+            <td>{{.Version}}</td>
+            <td>{{.State}}</td>
+            <td>{{.Category}}</td>
+            <td><details><summary>text</summary><pre>{{.Text}}</pre></details></td>
+          </tr>
+        {{end}}
+      </table>
+    </section>
+  {{end}}
+
+  <footer>
+    Read-only view. Nothing on this page writes — reload to refresh.
+  </footer>
+</main>
+</body>
+</html>
