@@ -1,0 +1,549 @@
+# KDS server configuration — sample
+#
+# Copy to kds.conf (or anywhere) and pass with:  kds_server --config <path>
+#
+# Format is `key = value`, one per line. `#` starts a comment. Quote a value
+# to keep surrounding whitespace or a literal '#'.
+#
+# Precedence: built-in defaults, then this file, then command-line flags.
+# A later source wins, so a flag can override a deployed file for one run.
+#
+# Every key below is optional — an omitted key keeps its default. An
+# *unknown* key is a startup error rather than a warning: a typo like
+# `chekpoint_interval_ms` would otherwise look like it worked, and the
+# operator would find out when the loss window turned out to be the default.
+
+# ---- Storage ---------------------------------------------------------------
+
+# Path to the data file. Created if absent.
+data_file = kds.db
+
+# Directory holding the per-core WAL segment files (docs/spec/wal.md §4.1).
+# Defaults to "<data_file>.wal" when unset.
+# wal_dir = kds.db.wal
+
+# How many bytes every variable-width value (a `varchar`) occupies inside a
+# tuple (docs/spec/heap-and-tuple.md §3.3). Every tuple is fixed-length: a
+# relation's row size is a schema constant, and a varchar gets exactly this
+# many bytes whatever it holds — which is what makes an UPDATE unable to
+# move a row.
+#
+# This key is read exactly once, when a *new* database is bootstrapped, and
+# the value is pinned into the superblock. Every later mount compares this
+# setting against the pinned one and refuses to start if they differ,
+# naming both: on-disk tuple layout is computed from the width, so running
+# with a different one would not fail, it would decode every row at the
+# wrong offsets. Changing it for an existing database is a rebuild, and
+# there is no migration path.
+#
+# The usable inline capacity is width − 3 (a tag byte and a u16 length); a
+# longer value belongs in the var-heap, which is specified but not yet
+# implemented, so it is refused today. Legal range 16..4096.
+#
+# 64 is [PROPOSED], not settled — sized so common OLTP strings (codes,
+# names, references) never spill, and to be measured against the real
+# string-length distributions of target schemas. The counter-cost is 64
+# bytes per string column per row, paid whether or not the value is short.
+inline_cell_width = 64
+
+# How many reactor cores this instance runs (docs/inflight/in-progress/workplan-crosscore.md M6).
+#
+# Pinned into the superblock when the database is created and validated
+# against it on every mount after — a mismatch refuses to start, naming both
+# numbers. WAL streams are per core, so this decides how many streams the
+# database has, and mounting under a different count would leave the
+# difference with nothing to replay them.
+#
+# A value above 1 spawns that many pinned reactor threads, each with its own
+# WAL stream (workplan P0-P2). **Core 0 still serves every statement**: a
+# peer cannot read the catalog until the per-core catalog cache exists
+# (workplan P6), so the other cores come up alive and idle. Raising this
+# today buys parallel WAL streams and nothing else - and costs a thread and
+# a ring matrix - so 1 remains the right setting until P4.
+#
+# Bounded above by the superblock's 64 WAL anchor slots, and refused if it
+# exceeds the machine's reported core count: reactors are pinned and never
+# block, so overcommitting them serializes whole workloads behind each other.
+cores = 1
+
+# Resident-frame budget for the whole instance's buffer pools, in 8 KiB
+# pages (docs/spec/eviction.md §6, EV4). Every core takes an *equal* share
+# - total / cores, the small remainder undistributed (operator invariant
+# 2026-08-24; the ratified min(cores, hardware cores) divisor collapses to
+# cores because boot refuses overcommit) - and a core past its share
+# evicts cold clean frames on fault (docs/spec/page.md §3). 0 (the
+# default) is unbounded. A nonzero value below `cores` is refused at boot:
+# an integer share of zero would mean unbounded on that core, the opposite
+# of a small budget's intent.
+# buffer_pool_frames = 0
+
+# Per-core listeners (docs/inflight/in-progress/workplan-peer-writer.md PW5). `on` binds the
+# text port on every core with SO_REUSEPORT and the kernel distributes
+# connections; a session lives on the core that accepted it, forever. A
+# peer-accepted session serves relations its core owns and refuses the
+# rest - the per-core benchmark shape, and a cliff for a general workload
+# (clients cannot choose their core). Requires `placement = rotate` and
+# cores > 1, and is refused in combination with tls or auth until the
+# credential store and TLS context can be shared across cores immutably.
+# Off by default.
+# peer_listeners = off
+
+# Relation placement (docs/inflight/in-progress/workplan-crosscore.md P6c). `creating` (default)
+# pins every relation to the creating core - which is core 0, since DDL is
+# core 0's. `rotate` spreads user relations over the non-system cores;
+# legal since CC7's flush-then-grant handoff, but until cross-core dispatch
+# exists a rotated relation's statements are refused retryably by the
+# affinity check - so rotate exercises the handoff, it does not serve
+# traffic. At cores = 1 rotate degrades to creating.
+placement = creating
+
+# ---- Network ---------------------------------------------------------------
+
+# TCP port, loopback only. 1..65535.
+port = 15432
+
+# Direct TLS on the port above (docs/spec/protocol.md §1, decided 2026-08-13).
+# With `tls = on` every connection must open with a TLS 1.3 handshake -
+# there is no plaintext fallback on the same port and no STARTTLS-style
+# upgrade, so a plaintext client is refused at its first byte. Off by
+# default because the port is loopback-only today; turning TLS on is the
+# precondition for that ever changing, not a decoration on loopback.
+#
+# When on, both files are required (the server refuses to start
+# otherwise, naming the missing key): PEM, the certificate first with any
+# chain appended, the key unencrypted. They are read once at startup - a
+# rotated certificate takes effect at the next start.
+#
+# A server built without TLS (cmake -DKDS_WITH_TLS=OFF) refuses
+# `tls = on` at startup naming the build flag.
+tls = off
+# tls_cert_file = /etc/kds/server.crt
+# tls_key_file  = /etc/kds/server.key
+
+# Connection authentication (docs/spec/protocol.md D8). `off` (default) admits
+# every connection; `scram` requires every connection to complete a
+# SCRAM-SHA-256 exchange before its first statement - STOP included. The
+# password never crosses the wire and the file below stores salted
+# verifiers, not passwords; still, pair it with `tls = on` anywhere the
+# traffic itself matters.
+#
+# `users_file` is required when auth = scram, and must hold at least one
+# user (an empty file refuses to start - a server nobody can reach is a
+# provisioning mistake, not a configuration). Provision users with:
+#
+#   kds_server --add-user alice --users-file /etc/kds/users
+#
+# Each user carries a role in the users file - readonly, readwrite or
+# admin, ordered by inclusion - checked per statement: reads and
+# transaction control need readonly, DML needs readwrite, DDL and
+# STOP/SYNC/server-wide SET need admin (docs/spec/protocol.md §14). The role
+# is chosen at provisioning (`--add-user --role ...`, default readonly);
+# changing one is delete-then-add. Per-relation GRANT/REVOKE does not
+# exist yet - it is the recorded refinement, gated on catalog recovery.
+#
+# Incompatible with `kwp_port` for now: the KWP load endpoint has no
+# auth stage, so `auth = scram` refuses to start while kwp_port is set -
+# an ungated second door on a guarded server is not a configuration.
+auth = off
+# users_file = /etc/kds/users
+
+# ---- Durability ------------------------------------------------------------
+
+# How often the system-group checkpoint task flushes dirty pages
+# (docs/spec/wal.md §11). This is the loss-window knob: lower means less data at
+# risk on a crash and more I/O. 0 disables the cadence entirely, which puts
+# durability back on SYNC and clean shutdown alone.
+#
+# Checkpoint cadence is an [OPEN] decision in docs/spec/wal.md §13 — this default
+# is a starting point, not a recommendation.
+checkpoint_interval_ms = 5000
+
+# Durability class applied to every logged statement (docs/spec/wal.md §1).
+# Today that means INSERT and nothing else — CREATE TABLE, UPDATE and the
+# catalog rows under both still write pages outside the log, so no setting
+# here makes them crash-safe.
+#
+#   strict  (d1)  the INSERT reply is sent only after its commit record is
+#                 fsync'd. One fsync per insert.
+#   group   (d2)  same durability point, one fsync amortized over a batch
+#                 of concurrent committers. Identical in cost to `strict`
+#                 until the server serves more than one connection at a
+#                 time, since a batch of one is a batch.
+#   relaxed (d3)  the reply is sent immediately; commits become durable on
+#                 the drain below. Trades a bounded loss window for not
+#                 waiting on the device — measured here as ~8x the insert
+#                 throughput of strict on an EBS gp3 volume.
+#
+# Per-transaction in the design; per-server here only because the newline
+# protocol has nowhere to carry it. KWP/1 makes it a protocol field.
+durability = group
+
+# How often the system-group WAL drain runs, in microseconds. It bounds a
+# `relaxed` commit's loss window and resolves a `group` batch nobody is
+# waiting on. A tick with nothing staged does no I/O, so this is cheap to
+# run often. 0 disables it, which leaves relaxed commits unsynced until the
+# next checkpoint or shutdown.
+wal_drain_interval_us = 1000
+
+# How long a `relaxed` commit may sit unsynced - D3's loss window
+# (docs/spec/wal.md). It is also a **latency** dial, which is less obvious: the
+# sync that enforces it runs on the reactor thread, so the statement in
+# flight when it fires pays the device's full latency. Measured on an EBS
+# volume, the default produces one ~2.2 ms statement every 12 ms and is the
+# whole of a relaxed instance's tail (bench/results-latency-matrix.md).
+# Raising it thins the stalls out and lengthens the window of committed work
+# a crash can lose; it cannot remove them.
+relaxed_flush_interval_us = 10000
+
+# ---- Query limits ----------------------------------------------------------
+
+# Ceiling on the tuples a single statement may decode before it is refused
+# with `ResourceExhausted`. 0 means unlimited.
+#
+# This is not a performance knob, it is a availability one. Nothing
+# suspends mid-statement: the engine is thread-per-core and cooperative
+# (docs/rules/rules.md §3), so a statement runs to completion on the core it
+# started on and every other client on that core waits for it. A statement
+# that reads an unbounded number of rows therefore does not run slowly, it
+# takes a core out of service.
+#
+# The easy way to write one is a correlated subquery or a join on a non-pk
+# column: both read the inner relation once per outer row, so two relations
+# of n rows is n² decodes from a statement that fits on one line and looks
+# entirely reasonable. Failing after a bounded amount of work is the kinder
+# answer than a connection that never replies - the client can rewrite the
+# statement, where it cannot diagnose a hang.
+#
+# The default is `[PROPOSED]`, set where it can only catch accidents: a
+# full scan of a relation filling a 64 MB buffer pool is on the order of
+# 10⁶ tuples, so 10⁸ leaves two orders of magnitude of headroom above
+# anything deliberate. The right number comes from measuring the workloads
+# this engine is actually pointed at.
+#
+# Set it to 0 for one honest purpose: measuring the cost of the very
+# statement the budget would refuse.
+max_rows_touched = 100000000
+
+# How many rows one INSERT statement may carry
+# (docs/spec/bulkinsert.md BI3: `INSERT INTO t VALUES (...), (...), ...`).
+#
+# A refusal, never a truncation: an over-cap statement is refused naming
+# the cap and the count, and inserts nothing. The cap bounds the memory a
+# statement holds before execution begins and the Keystone ids an aborted
+# bulk statement can burn (BI9). Must be at least 1; the default is
+# `[PROPOSED]`.
+max_insert_rows = 1024
+
+# ---- KWP (binary protocol) -------------------------------------------------
+
+# The KWP v0 load endpoint (docs/inflight/in-progress/workplan-kwp-load.md): a second, framed
+# listener carrying exactly the bulk load stream - handshake, BULK_LOAD
+# capability, C_LOAD_* session - while every query stays on the text port
+# above. 0 (the default) opens no socket at all. Loopback only.
+kwp_port = 0
+
+# ---- Waystone --------------------------------------------------------------
+
+# Whether a successful SELECT records where it found its rows, so a repeated
+# query pattern can later look instead of search (docs/spec/waystone-concpets.md).
+#
+# What it costs: one waystone page per pattern *instance* that executes twice
+# (once, for a pattern declared with CREATE PATTERN - a declaration is the
+# evidence the second execution would otherwise supply). Trails are unlogged,
+# so a crash loses whatever the last checkpoint did not carry, which costs
+# future replays and never results.
+#
+# What it buys: whatever `waystone_replay` below can then use. With replay
+# off this is pure write side and buys nothing, which is a reasonable way to
+# measure the recording cost on its own.
+#
+# Turning it on and off must never change a single reply. That equality is a
+# regression test, and it is also something you can check against your own
+# data.
+waystone_recording = on
+
+# Whether a SELECT may be served from a trail a previous execution recorded:
+# a validated location read directly, instead of a B+ tree descent or a heap
+# chain scan.
+#
+# This is the half that repays recording, and the only Waystone setting that
+# can be asked to produce a row. It still cannot change one: a trail supplies
+# a *location*, which is then read and filtered by exactly the code a
+# descent's location would have been, and every entry is validated against
+# the tuple actually there before anything is read from it. Deleting every
+# trail in the database changes latency and nothing else - that is invariant
+# 8, and tests/waystone_contract_test.cpp compares five configurations byte
+# for byte to keep it true.
+waystone_replay = on
+
+# ---- Access statistics -----------------------------------------------------
+
+# Whether a successful SELECT records what each of its steps actually did:
+# one row per access *shape* in `sys.access_stats`, readable with
+# `SHOW ACCESS` (docs/spec/heap-and-tuple.md section 7).
+#
+# A shape is `(kind, relation, columns)` - `Lookup`, `Probe`, `Range`,
+# `FilterScan` or `Scan`, the relation, and the columns the access was keyed
+# or filtered on. **Never the values**: `WHERE flag = 1` and `WHERE flag = 2`
+# are one shape with two uses. That is what bounds the relation by the schema
+# instead of by the data, so it needs no eviction and no cap beyond a
+# backstop.
+#
+# What it is for: the physical optimizer that section 7 describes. "This
+# relation was filter-scanned on `flag` 40,000 times" is the signal that
+# would justify clustering or indexing it. Since 2026-08-09 the optimizer's
+# shadow planner consumes it - SHOW RELAYOUT weighs these shapes into
+# candidate relayout plans (docs/spec/physical-optimizer.md) - though no
+# mover exists yet, so nothing acts on it.
+#
+# Measured cost: +1-2% on a point lookup, unmeasurable on anything slower.
+# Independent of the Waystone switches above.
+access_statistics = on
+
+# ---- Physical optimizer ----------------------------------------------------
+
+# The physical optimizer's mode (docs/spec/physical-optimizer.md R3).
+#
+#   off      SHOW RELAYOUT answers a one-line disabled notice.
+#   shadow   the default: the planner computes the relayout report when
+#            SHOW RELAYOUT asks - plans, predicted benefit, and the gate
+#            blocking each - and moves nothing. Pull-only, so it costs
+#            nothing at rest.
+#
+# `on` is refused at startup, naming the three gates that block every plan
+# (spec section 6): compaction needs the reader horizon that unregistered
+# readers withhold, clustering breaks the ordered-between property range
+# pruning reads, and page reuse across relations would break trail
+# validation. A config written for the future fails loudly today.
+physical_optimizer = shadow
+
+# How long an untouched decay score takes to lose half its weight, in
+# seconds (docs/spec/physical-optimizer.md R1). The lazy-decay score is the
+# one time-weighting the engine has: the physical-optimizer planner weighs
+# access shapes with it, and trail retention and the eviction temperature
+# hook are its declared future consumers.
+#
+# Decay is computed lazily at read and touch - there is no background pass,
+# so this key prices nothing per second; it only decides how fast "hot"
+# goes cold. One half-life halves a score exactly; the default is the
+# spec's `[PROPOSED]` 600, ten minutes, to be settled against a measured
+# workload. 0 is refused - instant decay is "no score", which is not a
+# configuration this engine offers.
+#
+# Consumed by the planner (workplan PX05). Until that lands the key
+# parses, validates, and steers nothing.
+decay_half_life = 600
+
+# The cabin optimizer - Part II of docs/spec/physical-optimizer.md: the
+# background controller that CREATEs/EXTENDs/HEALs/DROPs Observational
+# Cabins under a cost-benefit rule. **Off by default, experimental** - the
+# opposite default from `physical_optimizer` above, because a controller
+# that acts is not a report. `SET CABIN_OPTIMIZER ON|OFF` flips it at
+# runtime, non-destructively in both directions.
+#
+# The decision task that consumes these does not exist yet (workplan
+# PHY04, gated on the eviction track's scan ring); until it does the keys
+# parse, validate, and steer nothing - stated plainly.
+cabin_optimizer = off
+
+# The controller's tuning, every number `[PROPOSED]` (spec section II.6).
+# Thresholds are percent integers - 300 means a benefit/cost ratio of 3.0 -
+# and the one rule validation enforces is the hysteresis gap the
+# anti-thrash design stands on: theta_drop < 100 < theta_create.
+#cabin_optimizer_page_budget = 1024
+#cabin_optimizer_theta_create_pct = 300
+#cabin_optimizer_theta_drop_pct = 50
+#cabin_optimizer_theta_swap_pct = 200
+#cabin_optimizer_theta_extend_pct = 20
+#cabin_optimizer_theta_heal_pct = 10
+#cabin_optimizer_confirm_snapshots = 3
+#cabin_optimizer_snapshot_interval_ms = 10000
+
+# T_amort: how many decay half-lives a Cabin's build cost amortizes over.
+# One number, one belief - the structure's expected useful lifetime - read
+# by both sides of the cost model: the admission bar (build cost / window)
+# and the DROP cooldown (2 x window). The default 64 makes the cooldown
+# 21 h 20 m at the default 600 s half-life, so a Cabin survives a market's
+# close-to-open gap and the morning traffic recovers it without a rebuild;
+# a weekend of silence still drops it (re-nomination is cheap, staleness
+# is not). 1 restores the pre-2026-08-10 nightly-rebuild behaviour
+# (bench/results-cabin-optimizer-days.md is the measurement that moved
+# it). 0 is refused.
+#cabin_optimizer_amort_windows = 64
+
+# T_cooldown: how long a DECAYING Cabin is given to rebound before it is
+# dropped, in decay half-lives. Its own parameter since 2026-08-10 - it
+# used to be hardwired to 2 x the amortization window, which answered two
+# different questions with one number. The default 128 is what that
+# expression yielded at the shipped window (21 h 20 m at a 600 s
+# half-life), so decoupling changed no behaviour.
+#
+# Lowering it does NOT retire dead Cabins sooner unless your workload has
+# no quiet period: a dead Cabin and an overnight-quiet one both emit
+# silence, so anything below one night's worth of half-lives (~105 at the
+# default) retires live Cabins and brings back the nightly rebuild loop.
+# A 24/7 workload is the case that can safely lower it. 0 means no time
+# patience at all, leaving only the theta hysteresis.
+#cabin_optimizer_cooldown_half_lives = 128
+
+# ---- Cabins ----------------------------------------------------------------
+
+# Whether Cabins may be built and served (docs/spec/cabin.md).
+#
+# A Cabin is a per-(relation, non-pk column) store that is **authoritative
+# for the values queries have actually observed** - the third trust class,
+# between the clustered pk tree (always authoritative) and a Waystone trail
+# (never authoritative). For an observed value it holds a superset of the
+# matching rows' primary keys, so `WHERE sym = 'AAPL'` reads those rows
+# instead of the relation, and an observed value with *no* matching rows
+# answers zero rows without opening the relation at all - which no advisory
+# structure can do.
+#
+# What it costs: one in-memory directory probe per cabined column per write
+# to that relation. That is the price of authority - absence needs a witness
+# - and it is why a Cabin is per column and opt-in rather than automatic.
+# A relation with no Cabin pays one integer test.
+#
+# On by default because it does **nothing** until a `CREATE CABIN ON t(col)`
+# or a `CABIN` clause on a column at `CREATE TABLE`. Off is what the contract
+# tests compare against: replies must be byte-identical either way, one value
+# at a time, because un-observing a value is always legal.
+#
+# The sets live in memory only and do not survive a restart - by design, not
+# omission: the completeness promise holds only while the write hook is live,
+# so a crash declares every Cabin unobserved and traffic rebuilds it.
+cabins = on
+
+# ---- Secondary indexes (docs/spec/index.md) --------------------------------
+#
+# Whether a secondary index may be **read**. Off makes an index step take the
+# walk it would have taken had the index not existed.
+#
+# **A read-path switch only, and the asymmetry is deliberate.** There is no
+# key for index *maintenance*, because an index that stops being maintained
+# is wrong rather than slow - a config key that can produce a wrong answer is
+# not a config key. Turning the write cost off is a catalog act: `DROP INDEX`.
+#
+# On by default because it does nothing until a `CREATE INDEX`. Off is what
+# the contract tests compare against: replies must be byte-identical either
+# way, and the *compiled chain* is identical too - `indexes = off` steers the
+# branch inside an index step, never which step was compiled - so the
+# comparison is over execution rather than over planning.
+indexes = on
+
+# How much one Cabin may hold: distinct observed values, and entries per
+# value. `[PROPOSED]` - docs/spec/cabin.md section 8 leaves the budget open,
+# so these are configurable rather than compiled in, and nothing depends on
+# the numbers.
+#
+# What does depend on them is the rule they enforce: a cap **refuses to
+# observe** a value, and never truncates its entry set. A truncated set
+# marked authoritative would be missing rows a query is entitled to - a wrong
+# answer rather than a smaller one. So exceeding either limit returns that
+# value to the ordinary scan path, which is always legal.
+#
+# `cabin_max_values = 0` observes nothing, which switches the behaviour off
+# while keeping the catalog objects.
+cabin_max_values = 4096
+cabin_max_entries_per_value = 4096
+
+# ---- Aggregation -----------------------------------------------------------
+
+# How much one aggregated statement may hold: groups, and DISTINCT entries
+# summed over every set in the statement. `[PROPOSED]` - docs/spec/aggregate.md
+# section 6 leaves the numbers open until the first bench, so they are
+# configurable rather than compiled in and nothing depends on either value.
+#
+# What does depend on them is the rule they enforce, and it is a *different*
+# rule from the Cabin caps above. A Cabin that hits its cap stops observing
+# and falls back to a scan, which is always legal because a Cabin is only
+# ever a shortcut. An aggregation has no shortcut to fall back to: a group
+# set that stopped growing is missing groups, and a distinct set that stopped
+# growing counts too few. Both are wrong answers with a right answer's shape,
+# and no reader can detect either. So these caps **fail the statement**,
+# naming the key, and emit nothing at all - there is no spill, no truncation
+# and no partial answer.
+#
+# `aggregate_max_groups = 0` founds no group, which refuses every aggregated
+# statement while leaving the grammar in place.
+aggregate_max_groups = 65536
+aggregate_max_distinct = 1048576
+
+# How many rows one `ORDER BY` may hold. `[PROPOSED]` - the number was
+# left open when the sort was built, so it is configurable rather than
+# compiled in (docs/spec/parser-v2.md).
+#
+# A sort is on the aggregate side of the line drawn above, for the same
+# reason: it has no shortcut to fall back to. A sort that stopped holding
+# rows has silently dropped exactly the ones the client asked to see last,
+# which is a wrong answer with a right answer's shape. So this **fails the
+# statement**, naming the key, with no spill, no truncation and no partial
+# ordering.
+#
+# Counted in rows rather than bytes, following aggregate_max_groups: an
+# entry count is the number an operator can reason about against a row
+# width they already know.
+#
+# **A LIMIT is usually the answer to hitting this.** With one, a sort holds
+# `offset + limit` rows however large the relation is, so this cap binds
+# only an unlimited ORDER BY. A limit larger than the cap is not itself an
+# error - the cap fires only if that many rows actually arrive.
+#
+# `sort_max_rows = 0` holds no row, which refuses every statement needing a
+# sort while leaving the grammar in place. Statements ordered by the primary
+# key ascending are unaffected either way: they are elided, not sorted.
+sort_max_rows = 1048576
+
+# How many rows one statement-local inner build may hold - the per-statement
+# map that serves a join on a column with no index and no Cabin
+# (docs/spec/join-inner-build.md). Counted in rows for sort_max_rows'
+# reason; each entry is 24 bytes.
+#
+# Unlike the sort's cap this never refuses a statement at any value: past
+# the cap the step reverts to per-row walks for the rest of the statement -
+# the map is a shortcut and the walk is always there. `join_build_max_rows
+# = 0` disables the build outright, which is also the A/B lever for
+# measuring it.
+join_build_max_rows = 65536
+
+# ---- Logging ---------------------------------------------------------------
+
+# Diagnostic log destination. `log_dir` is prepended to `log_file` unless
+# `log_file` is already absolute. Missing directories are created.
+# Set log_file empty to disable file logging entirely.
+log_dir  =
+log_file = kdb.log
+
+# trace | debug | info | warn | error | off
+#
+# `debug` includes a line per checkpoint, which is the cheapest way to see
+# whether the cadence is actually running.
+log_level = info
+
+# The isolation level a session starts at, and therefore the level an
+# autocommit statement runs at (docs/spec/txn.md section 1).
+#
+#   read committed    (default) a read view per statement
+#   repeatable read             a read view per transaction
+#
+# READ COMMITTED is the default for a reason specific to this engine rather
+# than convention: under first-updater-wins with no waiting, REPEATABLE READ
+# holds one read view for a whole transaction and so turns more concurrent
+# writes into retryable aborts. SERIALIZABLE is out of scope, not unset.
+#
+# This is the server rung of a three-level chain - a session may override it
+# with `SET ISOLATION LEVEL`, and one transaction with
+# `BEGIN ISOLATION LEVEL`.
+# isolation = read committed
+
+# REMOVED 2026-08-25: default_key_mode
+#
+# There is no key mode to default (docs/spec/heap-and-tuple.md section 4.1).
+# Every relation takes a caller-named primary key or issues one when INSERT
+# omits it, per row, so an instance whose keys come from outside - a
+# migration, an upstream system, natural keys - now simply supplies them and
+# has nothing to configure.
+#
+# The key is still *recognized* by the loader so a file that kept the line
+# is refused at startup naming the removal, rather than falling to the
+# generic unknown-key error. Delete the line.

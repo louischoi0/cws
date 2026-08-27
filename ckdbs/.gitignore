@@ -1,0 +1,34 @@
+# Build trees. Any directory named build*/ - build/, build-btree/,
+# build-rel/, build-release/ - is a cmake output tree, so it carries the
+# object files, the static library and the kds_server/kds_tests/kds_bench
+# executables. build.sh is a script and is not matched by this.
+build*/
+
+# Runtime state of a server that was actually run: the data file, its WAL
+# segment directory (kds.db.wal/), and the log. kds.conf.sample is
+# committed; a real kds.conf is not.
+*.log
+kds.db
+kds.db.*
+kds.conf
+
+# Editor and interpreter droppings.
+*.sw[po]
+__pycache__/
+kds_server
+
+# Drafts for outside audiences (posts, talks) - working notes, not a spec.
+.article/
+
+# Session worktrees (.claude/worktrees/<name>) are checkouts of this same
+# repository. `git add -A` from the primary checkout otherwise stages each
+# one as an embedded-repo gitlink, which commits a pointer to a commit that
+# may only exist locally - and did, once, before this line.
+.claude/worktrees/
+
+# The simulation harness's triage output (bench/workplan-teststrategy
+# SIM07): scripts/sim.sh appends failures here, and `--minimize --out`
+# writes a case file. A case worth keeping is committed by hand under
+# tests/testdata/, never by being left lying in the tree.
+sim-artifacts.txt
+*.sim

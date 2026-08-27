@@ -1,0 +1,10 @@
+# cmake build trees for the vendored ckdbs engine. Rebuild with:
+#   cmake -S ckdbs -B ckdbs/build-release -DCMAKE_BUILD_TYPE=Release
+#   cmake --build ckdbs/build-release -j"$(nproc)" --target kds_server
+ckdbs/build/
+ckdbs/build-release/
+
+# Runtime state of this project's own KDS instance: data file, WAL
+# segments, and server logs (kds.conf itself is tracked — it has no
+# secrets, just this instance's layout).
+kds-data/
