@@ -59,11 +59,12 @@ func renderMarkdown(src string) template.HTML {
 // two services share a wire format, not a type, so the API can add a
 // field without this one failing to build.
 type milestone struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Directory string `json:"directory"`
-	State     string `json:"state"`
-	Version   string `json:"version"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	Directory     string `json:"directory"`
+	State         string `json:"state"`
+	Version       string `json:"version"`
+	LastUpdatedAt string `json:"last_updated_at"`
 }
 
 type task struct {
@@ -82,6 +83,7 @@ type task struct {
 	ClaimedAt     *string `json:"claimed_at"`
 	ClaimExpired  bool    `json:"claim_expired"`
 	State         string  `json:"state"`
+	LastUpdatedAt string  `json:"last_updated_at"`
 }
 
 type result struct {

@@ -8,6 +8,15 @@ own KDS instance; there is no external database or server involved.
 
 ## Data structures
 
+**Every table carries `last_updated_at`** (timestamp, KST in the API,
+UTC on disk), stamped at creation and re-stamped by every write to the
+row — `PATCH`, the state transition, and claim/release included, since
+those are writes like any other. It is maintained by `server/main.go`,
+not by the engine: KDS has no `ON UPDATE` trigger, so **a new write path
+that forgets to set it leaves the row silently stale**. Add it to the
+`SET` list of any new `UPDATE`.
+
+
 These drive the Claude-session-loop workflow. See `README.md`'s "The
 task/result loop" section for the operational picture,
 `.claude/agents/intermediary-agent.md` for the worker that does the

@@ -107,6 +107,11 @@ file could.
   for one project name and returns it as plain markdown text, meant to be
   copy-pasted straight into that project's own `CLAUDE.md`.
 
+Every table carries `last_updated_at`, set on creation and refreshed by
+every write to the row (claim and release included). The server maintains
+it — KDS has no `ON UPDATE` trigger — so a new write path that omits it
+leaves the row reading as older than it is.
+
 All markdown bodies (`issues.body`, `issue.content`, `task.content`,
 `result.content`) are stored base64-encoded and capped around 1.2 KB of
 raw text — KDS has no var-heap yet, so every `varchar` column is a

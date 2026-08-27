@@ -218,7 +218,7 @@
   .md hr { border: 0; border-top: 1px solid var(--md-line); margin: .8rem 0; }
 
   @media (max-width: 720px) {
-    td.claim, th.claim, td.num, th.num { display: none; }
+    td.claim, th.claim, td.num, th.num, td.opt, th.opt { display: none; }
     .nav .meta { display: none; }
   }
 </style>
@@ -254,7 +254,7 @@
       <table>
         <thead>
           <tr>
-            <th>id</th><th>state</th><th>milestone</th><th>version</th><th>directory</th>
+            <th>id</th><th>state</th><th>milestone</th><th>version</th><th>directory</th><th class="when">updated</th>
           </tr>
         </thead>
         <tbody>
@@ -265,6 +265,7 @@
             <td class="title">{{.Title}}</td>
             <td><span class="chip mono">{{.Version}}</span></td>
             <td class="id">{{.Directory}}</td>
+            <td class="when">{{shortTime .LastUpdatedAt}}</td>
           </tr>
         {{end}}
         </tbody>
@@ -306,7 +307,8 @@
           <thead>
             <tr>
               <th>id</th><th>state</th><th class="claim">claim</th>
-              <th>task</th><th>type</th><th class="num">prio</th><th>raised</th>
+              <th>task</th><th>type</th><th class="num">prio</th>
+              <th class="opt">raised</th><th>updated</th>
             </tr>
           </thead>
           <tbody>
@@ -345,7 +347,8 @@
               </td>
               <td><span class="chip">{{.Type}}</span></td>
               <td class="num">{{if .Priority}}{{.Priority}}{{else}}—{{end}}</td>
-              <td class="when">{{shortTime .RaisedAt}}</td>
+              <td class="when opt">{{shortTime .RaisedAt}}</td>
+              <td class="when">{{shortTime .LastUpdatedAt}}</td>
             </tr>
           {{end}}
           </tbody>

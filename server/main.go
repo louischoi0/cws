@@ -128,22 +128,24 @@ type insertRequest struct {
 // project/version/state/category. Distinct from `issue` below — the two
 // were named before the collision was noticed; see README.md.
 type issueReport struct {
-	ID       string `json:"id"`
-	Project  string `json:"project"`
-	Version  string `json:"version"`
-	State    string `json:"state"`
-	Category string `json:"category"`
-	Text     string `json:"text"`
+	ID            string `json:"id"`
+	Project       string `json:"project"`
+	Version       string `json:"version"`
+	State         string `json:"state"`
+	Category      string `json:"category"`
+	Text          string `json:"text"`
+	LastUpdatedAt string `json:"last_updated_at"`
 }
 
 // issue is a row of `issue` (singular): a lightweight per-project ticket
 // keyed by a human-chosen alias.
 type issue struct {
-	ID      string `json:"id"`
-	Project string `json:"project"`
-	Alias   string `json:"alias"`
-	Title   string `json:"title"`
-	Content string `json:"content"`
+	ID            string `json:"id"`
+	Project       string `json:"project"`
+	Alias         string `json:"alias"`
+	Title         string `json:"title"`
+	Content       string `json:"content"`
+	LastUpdatedAt string `json:"last_updated_at"`
 }
 
 type createIssueRequest struct {
@@ -157,11 +159,12 @@ type createIssueRequest struct {
 // that directory's issues and tasks until the milestone's state reads as
 // achieved (whatever token the caller uses for that; not enforced here).
 type milestone struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Directory string `json:"directory"`
-	State     string `json:"state"`
-	Version   string `json:"version"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	Directory     string `json:"directory"`
+	State         string `json:"state"`
+	Version       string `json:"version"`
+	LastUpdatedAt string `json:"last_updated_at"`
 }
 
 type createMilestoneRequest struct {
@@ -190,6 +193,9 @@ type task struct {
 	// against this task). They answer different questions and can
 	// legitimately disagree.
 	State string `json:"state"`
+	// LastUpdatedAt moves on every write to the row — creation included,
+	// and claim/release too, since those are writes like any other.
+	LastUpdatedAt string `json:"last_updated_at"`
 	// ClaimExpired reports whether a held claim is past claimLeaseTTL and
 	// so may be stolen. False when nothing holds the task.
 	ClaimExpired bool `json:"claim_expired"`
@@ -211,11 +217,12 @@ type createTaskRequest struct {
 }
 
 type result struct {
-	ID          string `json:"id"`
-	TaskID      string `json:"task_id"`
-	Status      string `json:"status"`
-	Content     string `json:"content"`
-	CompletedAt string `json:"completed_at"`
+	ID            string `json:"id"`
+	TaskID        string `json:"task_id"`
+	Status        string `json:"status"`
+	Content       string `json:"content"`
+	CompletedAt   string `json:"completed_at"`
+	LastUpdatedAt string `json:"last_updated_at"`
 }
 
 type createResultRequest struct {
@@ -317,11 +324,11 @@ func ensureTables(db *KDSClient) error {
 	// never migrates an existing one's columns (KDS's ALTER TABLE can
 	// rename but not add/drop columns; see README.md).
 	tables := []struct{ name, stmt string }{
-		{"issues", "CREATE TABLE issues (id int64, project varchar, version varchar, state varchar, category varchar, body varchar) BTREE"},
-		{"issue", "CREATE TABLE issue (id int64, project varchar, alias varchar, title varchar, content varchar) BTREE"},
-		{"milestone", "CREATE TABLE milestone (id int64, title varchar, directory varchar, state varchar, version varchar) BTREE"},
-		{"task", "CREATE TABLE task (id int64, version varchar, title varchar, content varchar, type varchar, raised_at timestamp, last_shipped_at timestamp, derived_from int64 NULL, milestone_id int64 NULL REFERENCES milestone, priority int64 NULL, claimed_by varchar NULL, claimed_at timestamp NULL, state int64) BTREE"},
-		{"result", "CREATE TABLE result (id int64, task_id int64 REFERENCES task, status varchar, content varchar, completed_at timestamp) BTREE"},
+		{"issues", "CREATE TABLE issues (id int64, project varchar, version varchar, state varchar, category varchar, body varchar, last_updated_at timestamp) BTREE"},
+		{"issue", "CREATE TABLE issue (id int64, project varchar, alias varchar, title varchar, content varchar, last_updated_at timestamp) BTREE"},
+		{"milestone", "CREATE TABLE milestone (id int64, title varchar, directory varchar, state varchar, version varchar, last_updated_at timestamp) BTREE"},
+		{"task", "CREATE TABLE task (id int64, version varchar, title varchar, content varchar, type varchar, raised_at timestamp, last_shipped_at timestamp, derived_from int64 NULL, milestone_id int64 NULL REFERENCES milestone, priority int64 NULL, claimed_by varchar NULL, claimed_at timestamp NULL, state int64, last_updated_at timestamp) BTREE"},
+		{"result", "CREATE TABLE result (id int64, task_id int64 REFERENCES task, status varchar, content varchar, completed_at timestamp, last_updated_at timestamp) BTREE"},
 	}
 	for _, t := range tables {
 		if existing[t.name] {
@@ -371,7 +378,7 @@ var helpEndpoints = []helpEndpoint{
 	{
 		Method:      "GET",
 		Path:        "/overview",
-		Description: "Every row of every table in one read-only snapshot, for a dashboard. Exists because the scoped endpoints cannot answer \"show me everything\": GET /tasks/ requires a milestone_id, GET /issue/ needs a project name with no way to enumerate projects, and GET /issues/ needs all four path segments. Unpaginated by design.",
+		Description: "Every row of every table in one read-only snapshot, for a dashboard. Every row carries last_updated_at, stamped on creation and on every write to it. Exists because the scoped endpoints cannot answer \"show me everything\": GET /tasks/ requires a milestone_id, GET /issue/ needs a project name with no way to enumerate projects, and GET /issues/ needs all four path segments. Unpaginated by design.",
 		Response:    "{milestones, tasks, results, issues, issue_reports}, each a JSON array in id order.",
 	},
 	{
@@ -744,8 +751,9 @@ func handleCreateIssueReport(db *KDSClient) http.HandlerFunc {
 			return
 		}
 
-		stmt := fmt.Sprintf("INSERT INTO issues VALUES ('%s', '%s', '%s', '%s', '%s')",
-			path["project"], path["version"], path["state"], path["category"], body)
+		stmt := fmt.Sprintf("INSERT INTO issues VALUES ('%s', '%s', '%s', '%s', '%s', '%s')",
+			path["project"], path["version"], path["state"], path["category"], body,
+			kdsTimestampLiteral(time.Now()))
 		reply, err := db.Exec(stmt)
 		if err != nil {
 			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
@@ -823,7 +831,9 @@ func handleCreateIssue(db *KDSClient) http.HandlerFunc {
 			return
 		}
 
-		stmt := fmt.Sprintf("INSERT INTO issue VALUES ('%s', '%s', '%s', '%s')", project, req.Alias, req.Title, content)
+		now := kdsTimestampLiteral(time.Now())
+		stmt := fmt.Sprintf("INSERT INTO issue VALUES ('%s', '%s', '%s', '%s', '%s')",
+			project, req.Alias, req.Title, content, now)
 		reply, err := db.Exec(stmt)
 		if err != nil {
 			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
@@ -833,7 +843,8 @@ func handleCreateIssue(db *KDSClient) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(issue{ID: id, Project: project, Alias: req.Alias, Title: req.Title, Content: req.Content})
+		json.NewEncoder(w).Encode(issue{ID: id, Project: project, Alias: req.Alias,
+			Title: req.Title, Content: req.Content, LastUpdatedAt: formatKST(now)})
 	}
 }
 
@@ -918,7 +929,9 @@ func handleCreateMilestone(db *KDSClient) http.HandlerFunc {
 			return
 		}
 
-		stmt := fmt.Sprintf("INSERT INTO milestone VALUES ('%s', '%s', '%s', '%s')", req.Title, req.Directory, req.State, req.Version)
+		now := kdsTimestampLiteral(time.Now())
+		stmt := fmt.Sprintf("INSERT INTO milestone VALUES ('%s', '%s', '%s', '%s', '%s')",
+			req.Title, req.Directory, req.State, req.Version, now)
 		reply, err := db.Exec(stmt)
 		if err != nil {
 			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
@@ -928,7 +941,8 @@ func handleCreateMilestone(db *KDSClient) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(milestone{ID: id, Title: req.Title, Directory: req.Directory, State: req.State, Version: req.Version})
+		json.NewEncoder(w).Encode(milestone{ID: id, Title: req.Title, Directory: req.Directory,
+			State: req.State, Version: req.Version, LastUpdatedAt: formatKST(now)})
 	}
 }
 
@@ -1021,6 +1035,7 @@ func handleUpdateMilestone(db *KDSClient) http.HandlerFunc {
 			return
 		}
 
+		sets = append(sets, fmt.Sprintf("last_updated_at = '%s'", kdsTimestampLiteral(time.Now())))
 		reply, err := db.Exec(fmt.Sprintf("UPDATE milestone SET %s WHERE id = %s", strings.Join(sets, ", "), id))
 		if err != nil {
 			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
@@ -1130,9 +1145,9 @@ func handleCreateTask(db *KDSClient) http.HandlerFunc {
 		now := kdsTimestampLiteral(time.Now())
 		// state always starts at init; it moves only through
 		// POST /tasks/{id}/state/, never at creation.
-		stmt := fmt.Sprintf("INSERT INTO task VALUES ('%s', '%s', '%s', '%s', '%s', '%s', %s, %s, %s, NULL, NULL, %d)",
+		stmt := fmt.Sprintf("INSERT INTO task VALUES ('%s', '%s', '%s', '%s', '%s', '%s', %s, %s, %s, NULL, NULL, %d, '%s')",
 			req.Version, req.Title, content, req.Type, now, now,
-			derivedFromLiteral, milestoneIDLiteral, priorityLiteral, taskStateInit)
+			derivedFromLiteral, milestoneIDLiteral, priorityLiteral, taskStateInit, now)
 		reply, err := db.Exec(stmt)
 		if err != nil {
 			if strings.Contains(err.Error(), "FK_VIOLATION") {
@@ -1159,6 +1174,7 @@ func handleCreateTask(db *KDSClient) http.HandlerFunc {
 			MilestoneID:   req.MilestoneID,
 			Priority:      req.Priority,
 			State:         taskStateName(taskStateInit),
+			LastUpdatedAt: formatKST(now),
 		})
 	}
 }
@@ -1431,6 +1447,7 @@ func handleUpdateTask(db *KDSClient) http.HandlerFunc {
 			return
 		}
 
+		sets = append(sets, fmt.Sprintf("last_updated_at = '%s'", kdsTimestampLiteral(time.Now())))
 		reply, err := db.Exec(fmt.Sprintf("UPDATE task SET %s WHERE id = %s", strings.Join(sets, ", "), id))
 		if err != nil {
 			if strings.Contains(err.Error(), "FK_VIOLATION") {
@@ -1475,7 +1492,8 @@ func handleSetTaskState(db *KDSClient) http.HandlerFunc {
 		// Any state may follow any other: no transition table is enforced,
 		// because nothing here knows enough to rule one out — a task can
 		// legitimately go done -> inprogress when work reopens.
-		reply, err := db.Exec(fmt.Sprintf("UPDATE task SET state = %d WHERE id = %s", code, id))
+		reply, err := db.Exec(fmt.Sprintf("UPDATE task SET state = %d, last_updated_at = '%s' WHERE id = %s",
+			code, kdsTimestampLiteral(time.Now()), id))
 		if err != nil {
 			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
 			return
@@ -1525,8 +1543,8 @@ func handleClaimTask(db *KDSClient) http.HandlerFunc {
 
 		// Phase 1 — the task is unclaimed.
 		reply, err := db.Exec(fmt.Sprintf(
-			"UPDATE task SET claimed_by = '%s', claimed_at = '%s' WHERE id = %s AND claimed_by IS NULL",
-			req.Agent, now, id))
+			"UPDATE task SET claimed_by = '%s', claimed_at = '%s', last_updated_at = '%s' WHERE id = %s AND claimed_by IS NULL",
+			req.Agent, now, now, id))
 		if err != nil {
 			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
 			return
@@ -1570,8 +1588,8 @@ func handleClaimTask(db *KDSClient) http.HandlerFunc {
 		// Refresh (same agent) or steal (expired), both conditional on the
 		// row still holding exactly what was just read.
 		reply, err = db.Exec(fmt.Sprintf(
-			"UPDATE task SET claimed_by = '%s', claimed_at = '%s' WHERE id = %s AND claimed_by = '%s' AND claimed_at = '%s'",
-			req.Agent, now, id, *t.ClaimedBy, t.claimedAtRaw))
+			"UPDATE task SET claimed_by = '%s', claimed_at = '%s', last_updated_at = '%s' WHERE id = %s AND claimed_by = '%s' AND claimed_at = '%s'",
+			req.Agent, now, now, id, *t.ClaimedBy, t.claimedAtRaw))
 		if err != nil {
 			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
 			return
@@ -1621,8 +1639,8 @@ func handleReleaseTask(db *KDSClient) http.HandlerFunc {
 		}
 
 		reply, err := db.Exec(fmt.Sprintf(
-			"UPDATE task SET claimed_by = NULL, claimed_at = NULL WHERE id = %s AND claimed_by = '%s'",
-			id, req.Agent))
+			"UPDATE task SET claimed_by = NULL, claimed_at = NULL, last_updated_at = '%s' WHERE id = %s AND claimed_by = '%s'",
+			kdsTimestampLiteral(time.Now()), id, req.Agent))
 		if err != nil {
 			http.Error(w, "kds: "+err.Error(), http.StatusBadGateway)
 			return
@@ -1681,8 +1699,8 @@ func handleCreateResult(db *KDSClient) http.HandlerFunc {
 		// work is done regardless of whose lease it was, and leaving a
 		// stale lease behind would block the next attempt for a full TTL.
 		now := kdsTimestampLiteral(time.Now())
-		insertStmt := fmt.Sprintf("INSERT INTO result VALUES (%s, '%s', '%s', '%s')", id, req.Status, content, now)
-		updateStmt := fmt.Sprintf("UPDATE task SET last_shipped_at = '%s', claimed_by = NULL, claimed_at = NULL WHERE id = %s", now, id)
+		insertStmt := fmt.Sprintf("INSERT INTO result VALUES (%s, '%s', '%s', '%s', '%s')", id, req.Status, content, now, now)
+		updateStmt := fmt.Sprintf("UPDATE task SET last_shipped_at = '%s', claimed_by = NULL, claimed_at = NULL, last_updated_at = '%s' WHERE id = %s", now, now, id)
 
 		replies, err := db.ExecTxn([]string{insertStmt, updateStmt})
 		if err != nil {
@@ -1698,11 +1716,12 @@ func handleCreateResult(db *KDSClient) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(result{
-			ID:          resultID,
-			TaskID:      id,
-			Status:      req.Status,
-			Content:     req.Content,
-			CompletedAt: formatKST(now),
+			ID:            resultID,
+			TaskID:        id,
+			Status:        req.Status,
+			Content:       req.Content,
+			CompletedAt:   formatKST(now),
+			LastUpdatedAt: formatKST(now),
 		})
 	}
 }
@@ -1752,7 +1771,7 @@ func parseIssueReportRows(reply string) ([]issueReport, error) {
 	rows := splitSelectRows(reply)
 	reports := make([]issueReport, 0, len(rows))
 	for _, cols := range rows {
-		if len(cols) != 6 {
+		if len(cols) != 7 {
 			return nil, fmt.Errorf("unexpected row shape: %v", cols)
 		}
 		raw, err := base64.StdEncoding.DecodeString(cols[5])
@@ -1760,12 +1779,13 @@ func parseIssueReportRows(reply string) ([]issueReport, error) {
 			return nil, fmt.Errorf("decode body: %w", err)
 		}
 		reports = append(reports, issueReport{
-			ID:       cols[0],
-			Project:  cols[1],
-			Version:  cols[2],
-			State:    cols[3],
-			Category: cols[4],
-			Text:     string(raw),
+			ID:            cols[0],
+			Project:       cols[1],
+			Version:       cols[2],
+			State:         cols[3],
+			Category:      cols[4],
+			Text:          string(raw),
+			LastUpdatedAt: formatKST(cols[6]),
 		})
 	}
 	return reports, nil
@@ -1777,7 +1797,7 @@ func parseIssueRows(reply string) ([]issue, error) {
 	rows := splitSelectRows(reply)
 	issues := make([]issue, 0, len(rows))
 	for _, cols := range rows {
-		if len(cols) != 5 {
+		if len(cols) != 6 {
 			return nil, fmt.Errorf("unexpected row shape: %v", cols)
 		}
 		raw, err := base64.StdEncoding.DecodeString(cols[4])
@@ -1785,11 +1805,12 @@ func parseIssueRows(reply string) ([]issue, error) {
 			return nil, fmt.Errorf("decode content: %w", err)
 		}
 		issues = append(issues, issue{
-			ID:      cols[0],
-			Project: cols[1],
-			Alias:   cols[2],
-			Title:   cols[3],
-			Content: string(raw),
+			ID:            cols[0],
+			Project:       cols[1],
+			Alias:         cols[2],
+			Title:         cols[3],
+			Content:       string(raw),
+			LastUpdatedAt: formatKST(cols[5]),
 		})
 	}
 	return issues, nil
@@ -1802,15 +1823,16 @@ func parseMilestoneRows(reply string) ([]milestone, error) {
 	rows := splitSelectRows(reply)
 	milestones := make([]milestone, 0, len(rows))
 	for _, cols := range rows {
-		if len(cols) != 5 {
+		if len(cols) != 6 {
 			return nil, fmt.Errorf("unexpected row shape: %v", cols)
 		}
 		milestones = append(milestones, milestone{
-			ID:        cols[0],
-			Title:     cols[1],
-			Directory: cols[2],
-			State:     cols[3],
-			Version:   cols[4],
+			ID:            cols[0],
+			Title:         cols[1],
+			Directory:     cols[2],
+			State:         cols[3],
+			Version:       cols[4],
+			LastUpdatedAt: formatKST(cols[5]),
 		})
 	}
 	return milestones, nil
@@ -1818,12 +1840,12 @@ func parseMilestoneRows(reply string) ([]milestone, error) {
 
 // parseTaskRows decodes `task`'s column order: id, version, title, content,
 // type, raised_at, last_shipped_at, derived_from, milestone_id, priority,
-// claimed_by, claimed_at, state.
+// claimed_by, claimed_at, state, last_updated_at.
 func parseTaskRows(reply string) ([]task, error) {
 	rows := splitSelectRows(reply)
 	tasks := make([]task, 0, len(rows))
 	for _, cols := range rows {
-		if len(cols) != 13 {
+		if len(cols) != 14 {
 			return nil, fmt.Errorf("unexpected row shape: %v", cols)
 		}
 		raw, err := base64.StdEncoding.DecodeString(cols[3])
@@ -1884,6 +1906,7 @@ func parseTaskRows(reply string) ([]task, error) {
 			ClaimedAt:     claimedAt,
 			ClaimExpired:  claimExpired,
 			State:         taskStateName(stateCode),
+			LastUpdatedAt: formatKST(cols[13]),
 			claimedAtRaw:  claimedAtRaw,
 		})
 	}
@@ -1927,7 +1950,7 @@ func parseResultRows(reply string) ([]result, error) {
 	rows := splitSelectRows(reply)
 	results := make([]result, 0, len(rows))
 	for _, cols := range rows {
-		if len(cols) != 5 {
+		if len(cols) != 6 {
 			return nil, fmt.Errorf("unexpected row shape: %v", cols)
 		}
 		raw, err := base64.StdEncoding.DecodeString(cols[3])
@@ -1935,11 +1958,12 @@ func parseResultRows(reply string) ([]result, error) {
 			return nil, fmt.Errorf("decode content: %w", err)
 		}
 		results = append(results, result{
-			ID:          cols[0],
-			TaskID:      cols[1],
-			Status:      cols[2],
-			Content:     string(raw),
-			CompletedAt: formatKST(cols[4]),
+			ID:            cols[0],
+			TaskID:        cols[1],
+			Status:        cols[2],
+			Content:       string(raw),
+			CompletedAt:   formatKST(cols[4]),
+			LastUpdatedAt: formatKST(cols[5]),
 		})
 	}
 	return results, nil
