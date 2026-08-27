@@ -7,7 +7,7 @@
 <style>
   :root {
     --bg: #f7f7f5; --panel: #fff; --ink: #14140f; --muted: #5c5c55;
-    --faint: #8a8a82; --line: #dededa; --line-soft: #eeeeea;
+    --faint: #6f6f68; --line: #dededa; --line-soft: #eeeeea;
     --accent: #0e6b66; --accent-bg: #e2f1ef; --accent-line: #b9dedb;
     --warn: #8a4b00; --warn-bg: #fbeedd;
     --hot: #9b2c1c; --hot-bg: #fbe6e2;
@@ -16,7 +16,7 @@
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #121210; --panel: #1c1c19; --ink: #f2f2ec; --muted: #a6a69d;
-      --faint: #7e7e76; --line: #35352f; --line-soft: #292924;
+      --faint: #94948b; --line: #35352f; --line-soft: #292924;
       --accent: #6ed3c8; --accent-bg: #142e2c; --accent-line: #2c5652;
       --warn: #e0a851; --warn-bg: #332612;
       --hot: #f08a76; --hot-bg: #331e19;
@@ -27,18 +27,23 @@
   html { scroll-behavior: smooth; scroll-padding-top: 4.5rem; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
-    font: 15.5px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
   main { max-width: 1120px; margin: 0 auto; padding: 1.5rem 1.25rem 5rem; }
 
+  /* Type scale. Five levels, each a clear step from the next:
+     L1 section headline · L2 group name · L3 row title · L4 metadata ·
+     L5 body copy. Size, weight and colour move together — a level that
+     differs only in one of the three reads as the same level. */
+
   /* ---- top nav ---------------------------------------------------- */
+  /* Flat and neutral: no gradient, no translucency, no blur, and no accent
+     tint on the surface. The accent stays on the text only. */
   .nav {
     position: sticky; top: 0; z-index: 10;
-    background: var(--accent-bg); /* fallback where color-mix is unsupported */
-    background: color-mix(in srgb, var(--accent-bg) 88%, transparent);
-    backdrop-filter: blur(8px);
-    border-bottom: 1px solid var(--accent-line);
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
   }
   .nav-inner {
     max-width: 1120px; margin: 0 auto; padding: .7rem 1.25rem;
@@ -53,24 +58,27 @@
     color: var(--accent); font-size: .88rem; font-weight: 550;
     border: 1px solid transparent;
   }
-  .nav a:hover { background: var(--panel); border-color: var(--accent-line); }
+  /* The surface is --panel now, so hover and the badge need a neutral that
+     is not --panel — otherwise both vanish into the bar. */
+  .nav a:hover { background: var(--chip); border-color: var(--line); }
   .nav .count {
-    background: var(--panel); color: var(--accent); border-radius: 999px;
-    padding: 0 .38rem; font-size: .74rem; font-weight: 600; font-variant-numeric: tabular-nums;
-    border: 1px solid var(--accent-line);
+    background: var(--chip); color: var(--muted); border-radius: 999px;
+    padding: 0 .4rem; font-size: .74rem; font-weight: 600; font-variant-numeric: tabular-nums;
   }
+  .nav a:hover .count { color: var(--ink); }
   .nav .meta { margin-left: auto; color: var(--muted); font-size: .76rem; }
 
   /* ---- sections --------------------------------------------------- */
-  h2.sec {
-    font-size: 1.15rem; font-weight: 650; letter-spacing: -.02em;
+  h2.sec {                                   /* L1 */
+    font-size: 1.42rem; font-weight: 700; letter-spacing: -.025em;
     color: var(--accent);
-    margin: 2.4rem 0 .9rem; padding-bottom: .45rem;
+    margin: 3.2rem 0 1rem; padding-bottom: .5rem;
     border-bottom: 2px solid var(--accent-line);
-    display: flex; align-items: baseline; gap: .55rem;
+    display: flex; align-items: baseline; gap: .6rem;
   }
-  h2.sec:first-of-type { margin-top: 1.4rem; }
-  h2.sec .n { color: var(--faint); font-size: .82rem; font-weight: 500; }
+  h2.sec:first-of-type { margin-top: 1.6rem; }
+  h2.sec .n { color: var(--faint); font-size: .78rem; font-weight: 500;
+              letter-spacing: 0; }
 
   .card { background: var(--panel); border: 1px solid var(--line);
           border-radius: 10px; overflow: hidden; margin-bottom: 1rem; }
@@ -80,7 +88,8 @@
     border-bottom: 1px solid var(--line);
     display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap;
   }
-  .grp-head .name { font-weight: 600; font-size: .98rem; }
+  .grp-head .name { font-weight: 650; font-size: 1.06rem;      /* L2 */
+                    letter-spacing: -.012em; }
   .grp-head .dir { color: var(--faint); font-size: .78rem;
                    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .grp-head .tally { margin-left: auto; color: var(--muted); font-size: .8rem;
@@ -94,8 +103,9 @@
     padding: .5rem 1rem; border-bottom: 1px solid var(--line);
     background: var(--panel); white-space: nowrap;
   }
-  td { padding: .65rem 1rem; text-align: left; vertical-align: top;
-       border-bottom: 1px solid var(--line-soft); }
+  td { padding: .7rem 1rem; text-align: left; vertical-align: top;
+       border-bottom: 1px solid var(--line-soft);
+       font-size: .86rem; color: var(--muted); }        /* L4 metadata */
   tbody tr:last-child td { border-bottom: 0; }
   tbody tr:nth-child(even) { background: var(--stripe); }
 
@@ -105,7 +115,8 @@
             font-variant-numeric: tabular-nums; }
   td.num { text-align: right; width: 4.5rem; font-variant-numeric: tabular-nums;
            color: var(--muted); font-size: .85rem; }
-  .title { font-weight: 550; }
+  .title { font-size: .97rem; font-weight: 600; color: var(--ink);
+           letter-spacing: -.008em; }                    /* L3 row title */
 
   /* State as its own column, not a tag floating in the title. */
   td.state { width: 6.5rem; white-space: nowrap; font-size: .84rem; font-weight: 600; }
